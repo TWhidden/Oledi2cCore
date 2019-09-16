@@ -1,0 +1,9 @@
+﻿C++ / FT232H / I2C / SSD1306
+https://github.com/chadwyck-w/FT232H-MPSSE-I2C-SSD1306-OLED
+
+SH1106
+https://github.com/SuperHouse/esp-open-rtos/blob/master/extras/ssd1306/ssd1306.c
+PDF Sheet: https://www.displayfuture.com/Display/datasheet/controller/SH1106.pdf
+
+
+

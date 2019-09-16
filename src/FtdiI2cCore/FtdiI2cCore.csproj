@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
+    <RootNamespace>FtdiI2cCore</RootNamespace>
+    <AssemblyName>FtdiI2cCore</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="ftdi-i2c.cs" />
+  </ItemGroup>
+
+</Project>
