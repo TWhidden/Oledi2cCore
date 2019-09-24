@@ -1,8 +1,8 @@
 ﻿using System.Runtime.CompilerServices;
 
-namespace FtdiCore
+namespace GpioI2cCore
 {
-    public interface ILogger
+    public interface IGpioLogger
     {
         void Info(string logMessage, [CallerMemberName] string caller = "");
     }

@@ -23,13 +23,12 @@
 
 
 using System;
-using System.Text;
-using System.Runtime.InteropServices;
-using System.Threading;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 
-
-namespace FTD2XX_NET
+namespace FtdiCore._3rdParty
 {
     /// <summary>
     /// Class wrapper for FTD2XX.DLL

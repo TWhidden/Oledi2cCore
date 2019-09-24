@@ -1,6 +1,6 @@
-﻿namespace FtdiI2cCore
+﻿namespace FtdiCore
 {
-    public interface IFtdiCore
+    public interface IFtdiI2cCore
     {
         uint DeviceIndex { get; }
         bool ReadByteAndSendNAK();
@@ -13,5 +13,7 @@
         bool SetupMpsse();
         void ShutdownFtdi();
         void ScanDevicesAndQuit();
+
+        bool GetPinStatus(byte mask);
     }
 }

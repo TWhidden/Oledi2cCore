@@ -3,11 +3,15 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.29215.179
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FtdiI2cCore", "FtdiI2cCore\FtdiI2cCore.csproj", "{2F1E1186-457D-4EE6-A65D-220D73F1BE45}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FtdiCore", "FtdiI2cCore\FtdiCore.csproj", "{2F1E1186-457D-4EE6-A65D-220D73F1BE45}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OledI2cCore", "OledI2cCore\OledI2cCore.csproj", "{A58F9A12-5D5E-4F5E-A8B8-E8D8FDFA7C01}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OledI2cCoreTests", "OledI2cCoreTests\OledI2cCoreTests.csproj", "{5FE76C99-3478-466E-97E0-7550753A887C}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GpioI2cCoreTests", "GpioI2cCoreTests\GpioI2cCoreTests.csproj", "{83EF1380-6A07-4969-AB8D-46CC7F7D2B9E}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GpioI2cCore", "GpioI2cCore\GpioI2cCore.csproj", "{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -27,6 +31,14 @@ Global
 		{5FE76C99-3478-466E-97E0-7550753A887C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5FE76C99-3478-466E-97E0-7550753A887C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5FE76C99-3478-466E-97E0-7550753A887C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{83EF1380-6A07-4969-AB8D-46CC7F7D2B9E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{83EF1380-6A07-4969-AB8D-46CC7F7D2B9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{83EF1380-6A07-4969-AB8D-46CC7F7D2B9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{83EF1380-6A07-4969-AB8D-46CC7F7D2B9E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

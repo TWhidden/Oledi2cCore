@@ -1,78 +1,59 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using FtdiCore;
+using GpioI2cCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using OledI2cCore;
+using Microsoft.VisualStudio.TestTools.UnitTesting.Logging;
 
-namespace Oled_i2c_bus_core_tests
+namespace GpioI2cCoreTests
 {
     [TestClass]
-    public class OledTests
+    public class GpioTests
     {
         private static readonly Logger Logger = new Logger();
 
         [TestMethod]
-        public void GeneralTesting()
+        public void TestButtonPress()
         {
-            var i2C = new FtdiI2cCore(0, Logger);
+            var i2C = new FtdiI2cCore(0, Logger, (byte)GpioPin.Pin8);
 
-            i2C.SetupMpsse();
+            var mpsseInit = i2C.SetupMpsse();
+            Assert.IsTrue(mpsseInit, "Mpsse could not init!");
 
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width:128, height: 64, logger: Logger);
+            ManualResetEvent statsUpdatedEvent = new ManualResetEvent(false);
 
-            oled.Initialise();
+            var buttonCore = new GpioButtonCore(new I2CWrapper2(i2C, Logger), GpioPin.Pin8);
+            bool pressed = false;
+            buttonCore.PressState += (sender, state) =>
+            {
+                pressed = state == GpioPressState.Pressed;
+                if(pressed) statsUpdatedEvent.Set();
+            };
 
-            oled.DrawPixel((byte)(oled.Width / 2), (byte)(oled.Height / 2), 1);
+            try
+            {
+                buttonCore.Initialize();
+                statsUpdatedEvent.WaitOne(10000, false);
 
-            oled.DrawLine(0, 20, 127, 20, 1);
-
-            oled.WriteString(new Oled_Font_5x7(), 2, "123456");
-
-            oled.UpdateDirtyBytes();
-        }
-
-
-        [TestMethod]
-        public void WriteText()
-        {
-            var i2C = new FtdiI2cCore(0, Logger);
-
-            i2C.SetupMpsse();
-
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width: 128, height: 64, logger: Logger);
-
-            oled.Initialise();
-
-            oled.SetCursor(10,10);
-            oled.WriteString(new Oled_Font_5x7(), 2, "1234567", sync: true);
-        }
-
-        [TestMethod]
-        public void DrawLineAcrossMiddle()
-        {
-            var i2C = new FtdiI2cCore(0, Logger);
-
-            i2C.SetupMpsse();
-
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width: 128, height: 64, logger: Logger);
-
-            oled.Initialise();
-
-            oled.DrawLine(0, (byte)(oled.Height/2), oled.Width, (byte)(oled.Height / 2), 1, true);
-
-            oled.WriteString(new Oled_Font_5x7(), 2, "H L Test", sync: true);
+                Assert.IsTrue(pressed, "Button was not pressed!");
+            }
+            finally
+            {
+                buttonCore.UnInitialize();
+            }
         }
     }
 
-    public class Logger : ILogger, IOledLogger
+    public class Logger : ILogger, IGpioLogger
     {
         public void Info(string logMessage, [CallerMemberName] string caller = "")
         {
             Trace.WriteLine($"[{caller}; {DateTime.Now:HH:mm:ss.fff}]: {logMessage}");
         }
     }
-    
+
     public class I2CWrapper2 : II2C
     {
         private readonly FtdiI2cCore _i2CWire;
@@ -139,6 +120,11 @@ namespace Oled_i2c_bus_core_tests
         public void ScanDevicesAndQuit()
         {
             _i2CWire.ScanDevicesAndQuit();
+        }
+
+        public bool GetPinStatus(byte mask)
+        {
+            return _i2CWire.GetPinStatus(mask);
         }
     }
 }

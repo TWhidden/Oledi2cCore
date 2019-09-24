@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <TargetFramework>netcoreapp3.0</TargetFramework>
-    <RootNamespace>Oled_i2c_bus_core_tests</RootNamespace>
 
     <IsPackable>false</IsPackable>
   </PropertyGroup>
@@ -15,7 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FtdiI2cCore\FtdiCore.csproj" />
-    <ProjectReference Include="..\OledI2cCore\OledI2cCore.csproj" />
+    <ProjectReference Include="..\GpioI2cCore\GpioI2cCore.csproj" />
   </ItemGroup>
 
 </Project>

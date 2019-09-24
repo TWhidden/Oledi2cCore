@@ -1,17 +1,37 @@
 ﻿using System;
-using FTD2XX_NET;
+using System.Diagnostics;
+using FtdiCore._3rdParty;
 
-namespace FtdiI2cCore
+namespace FtdiCore
 {
-    public class FtdiCore : IFtdiCore
+    public class FtdiI2cCore : IFtdiI2cCore
     {
-
         private readonly ILogger _logger;
+        private readonly byte _gpioDMask;
+
         public uint DeviceIndex { get; }
 
-        public FtdiCore(uint deviceIndex, ILogger logger)
+
+        /// <summary>
+        /// The I2C can be used with GPIO, but the GPIO pins need to bet setup with their
+        /// directions (in/out).  Use this mask durint Init to setup.
+        /// Note, Pins 0-2 are reserved on the FT232 for I2C
+        /// </summary>
+        /// <param name="deviceIndex"></param>
+        /// <param name="logger"></param>
+        /// <param name="gpioMask"></param>
+        public FtdiI2cCore(uint deviceIndex, ILogger logger, byte gpioDMask = 0)
         {
             _logger = logger;
+
+            var maskExcludingReservedDPins = 0x1F;
+            var maskIncludingDefaultDPins = 0xC0;
+
+            gpioDMask = (byte)(gpioDMask & maskExcludingReservedDPins);
+            gpioDMask = (byte) (gpioDMask | maskIncludingDefaultDPins);
+
+            _gpioDMask = gpioDMask;
+
             DeviceIndex = deviceIndex;
         }
 
@@ -403,7 +423,7 @@ namespace FtdiI2cCore
             // Set the idle states for the AD lines
             OutputBuffer[dwNumBytesToSend++] = 0x80;    // Command to set directions of ADbus and data values for pins set as o/p
             OutputBuffer[dwNumBytesToSend++] = 0x1B;        // 00011011
-            OutputBuffer[dwNumBytesToSend++] = 0x3B;    // 00111011
+            OutputBuffer[dwNumBytesToSend++] = _gpioDMask; //0xD4; //0x3B;    // 00111011
 
             // IDLE line states are ...
             // AD0 (SCL) is output high (open drain, pulled up externally)
@@ -541,21 +561,31 @@ namespace FtdiI2cCore
                 }
                 _logger.Info("Purged receive buffer.");
 
+                var pinSetupBuffer = new byte[]
+                {
+                    0x80,
+                    0,
+                    0xBB
+                };
+
+                //ftStatus |= _ftdiDevice.SetBaudRate(9600);
                 ftStatus |= _ftdiDevice.InTransferSize(65536);        // Set USB request transfer sizes
                 ftStatus |= _ftdiDevice.SetCharacters(0, false, 0, false);          // Disable event and error characters
                 ftStatus |= _ftdiDevice.SetTimeouts(5000, 5000);           // Set the read and write timeouts to 5 seconds
                 ftStatus |= _ftdiDevice.SetLatency(16);               // Keep the latency timer at default of 16ms
-                ftStatus |= _ftdiDevice.SetBitMode(0x0, 0x00);             // Reset the mode to whatever is set in EEPROM
-                ftStatus |= _ftdiDevice.SetBitMode(0x0, 0x02);             // Enable MPSSE mode
+                ftStatus |= _ftdiDevice.SetBitMode(0x0, FTDI.FT_BIT_MODES.FT_BIT_MODE_RESET);             // Reset the mode to whatever is set in EEPROM
+                ftStatus |= _ftdiDevice.SetBitMode(0x0, FTDI.FT_BIT_MODES.FT_BIT_MODE_MPSSE);             // Enable MPSSE mode
+                ftStatus |= _ftdiDevice.Write(pinSetupBuffer, pinSetupBuffer.Length, ref dwNumBytesSent);
 
                 // Inform the user if any errors were encountered
                 if (ftStatus != FTDI.FT_STATUS.FT_OK)
                 {
-                    _logger.Info("failure to initialize FTYPX46A device! ");
+                    _logger.Info("failure to initialize device! ");
                     return false;
                     //return 1;
                 }
-                //_logger.Info("MPSSE initialized.");
+
+                _logger.Info("MPSSE initialized.");
 
                 // #########################################################################################
                 // Synchronise the MPSSE by sending bad command AA to it
@@ -793,6 +823,53 @@ namespace FtdiI2cCore
             _logger.Info("Shutting Down");
             _ftdiDevice.SetBitMode(0x0, 0x00);
             _ftdiDevice.Close();
+        }
+
+        public bool GetPinStatus(byte mask)
+        {
+            //dwNumBytesToSend = 0;           // Clear output buffer
+            //FTDI.FT_STATUS ftStatus = FTDI.FT_STATUS.FT_OK;
+
+            //// Combine the Read/Write bit and the actual data to make a single byte with 7 data bits and the R/W in the LSB
+            //OutputBuffer[dwNumBytesToSend++] = 0x81;        // command to clock data bytes out MSB first on clock falling edge
+
+            ////OutputBuffer[dwNumBytesToSend++] = 0x87;    //Send answer back immediate command
+
+            //ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
+
+            ////Check if ACK bit received by reading the byte sent back from the FT232H containing the ACK bit
+            //ftStatus = _ftdiDevice.Read(InputBuffer, 1, ref dwNumBytesRead);      //Read one byte from device receive buffer
+
+            //if ((ftStatus != FTDI.FT_STATUS.FT_OK) || (dwNumBytesRead == 0))
+            //{
+            //    _logger.Info("Failed to get ACK from I2C Slave - 0 bytes read");
+            //    return false; //Error, can't get the ACK bit
+            //}
+            //else
+            //{
+            //    var v = InputBuffer[0];
+            //    //var ack = (v & 0x01);
+            //    //if (ack != 0x00)     //Check ACK bit 0 on data byte read out
+            //    //{
+            //    //    //_logger.Info("Failed to get ACK from I2C Slave - Response was 0x%X", InputBuffer[0]);
+            //    //    return false; //Error, can't get the ACK bit 
+            //    //}
+
+            //}
+            ////_logger.Info("Received ACK bit from Address 0x%X - 0x%X", dwDataSend, InputBuffer[0]);
+            //return true;       // Return True if the ACK was received
+
+
+            byte value = 0;
+            SetI2CLinesIdle();
+            if (_ftdiDevice.GetPinStates(ref value) == FTDI.FT_STATUS.FT_OK)
+            {
+                Debug.WriteLine($"value: {value}");
+                var result = value & mask;
+                if (result > 0) return true;
+            }
+
+            return false;
         }
     }
 }

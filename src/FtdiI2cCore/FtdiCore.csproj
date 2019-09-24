@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>netcoreapp3.0</TargetFramework>
-    <RootNamespace>FtdiI2cCore</RootNamespace>
-    <AssemblyName>FtdiI2cCore</AssemblyName>
+    <RootNamespace>FtdiCore</RootNamespace>
+    <AssemblyName>FtdiCore</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
