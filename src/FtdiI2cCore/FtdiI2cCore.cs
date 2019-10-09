@@ -750,10 +750,10 @@ namespace FtdiCore
                 // Also set the required states of port AC0-7. Bit 6 is used as an active-low LED, the others are unused
                 // After this instruction, bit 6 will drive out high (LED off)
                 //dwNumBytesToSend = 0;             // Clear index to zero
-                OutputBuffer[dwNumBytesToSend++] = 0x82;  // Command to set directions of upper 8 pins and force value on bits set as output
-                OutputBuffer[dwNumBytesToSend++] = 0xFF;      // Write 1's to all bits, only affects those set as output
-                OutputBuffer[dwNumBytesToSend++] = 0x40;  // Set bit 6 as an output
-                ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent); // Send off the commands
+                //OutputBuffer[dwNumBytesToSend++] = 0x82;  // Command to set directions of upper 8 pins and force value on bits set as output
+                //OutputBuffer[dwNumBytesToSend++] = 0xFF;      // Write 1's to all bits, only affects those set as output
+                //OutputBuffer[dwNumBytesToSend++] = 0x40;  // Set bit 6 as an output
+                //ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent); // Send off the commands
             }
 
             return true;
@@ -770,7 +770,7 @@ namespace FtdiCore
         {
 
             _logger.Info("Scanning I2C bus:");
-            bool error;
+            bool success;
             byte address;
             int numDevices;
 
@@ -779,9 +779,9 @@ namespace FtdiCore
             {
                 SetI2CLinesIdle();
                 SetI2CStart();
-                error = SendAddressAndCheckACK(address, false);
+                success = SendAddressAndCheckACK(address, false);
                 SetI2CStop();
-                if (!error)
+                if (success)
                 {
                     //_logger.Info("I2C device found at address 0x");
                     _logger.Info("0x");
@@ -827,39 +827,6 @@ namespace FtdiCore
 
         public bool GetPinStatus(byte mask)
         {
-            //dwNumBytesToSend = 0;           // Clear output buffer
-            //FTDI.FT_STATUS ftStatus = FTDI.FT_STATUS.FT_OK;
-
-            //// Combine the Read/Write bit and the actual data to make a single byte with 7 data bits and the R/W in the LSB
-            //OutputBuffer[dwNumBytesToSend++] = 0x81;        // command to clock data bytes out MSB first on clock falling edge
-
-            ////OutputBuffer[dwNumBytesToSend++] = 0x87;    //Send answer back immediate command
-
-            //ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
-
-            ////Check if ACK bit received by reading the byte sent back from the FT232H containing the ACK bit
-            //ftStatus = _ftdiDevice.Read(InputBuffer, 1, ref dwNumBytesRead);      //Read one byte from device receive buffer
-
-            //if ((ftStatus != FTDI.FT_STATUS.FT_OK) || (dwNumBytesRead == 0))
-            //{
-            //    _logger.Info("Failed to get ACK from I2C Slave - 0 bytes read");
-            //    return false; //Error, can't get the ACK bit
-            //}
-            //else
-            //{
-            //    var v = InputBuffer[0];
-            //    //var ack = (v & 0x01);
-            //    //if (ack != 0x00)     //Check ACK bit 0 on data byte read out
-            //    //{
-            //    //    //_logger.Info("Failed to get ACK from I2C Slave - Response was 0x%X", InputBuffer[0]);
-            //    //    return false; //Error, can't get the ACK bit 
-            //    //}
-
-            //}
-            ////_logger.Info("Received ACK bit from Address 0x%X - 0x%X", dwDataSend, InputBuffer[0]);
-            //return true;       // Return True if the ACK was received
-
-
             byte value = 0;
             SetI2CLinesIdle();
             if (_ftdiDevice.GetPinStates(ref value) == FTDI.FT_STATUS.FT_OK)

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace OledI2cCore
 {
@@ -8,6 +9,7 @@ namespace OledI2cCore
     {
         private readonly II2C _wire;
 
+        private static readonly Oled_Font_5x7 DefaultFont = new Oled_Font_5x7();
         public byte Height { get; }
         public byte Width { get; }
 
@@ -17,6 +19,7 @@ namespace OledI2cCore
         public byte LetterSpacing { get; }
 
         private readonly IOledLogger _logger;
+        private readonly ScreenDriver _screenDriver;
 
         private static readonly Dictionary<byte, string> CommandLookup = new Dictionary<byte, string>(new List<KeyValuePair<byte, string>>
         {
@@ -45,10 +48,9 @@ namespace OledI2cCore
             new KeyValuePair<byte, string>(LEFT_HORIZONTAL_SCROLL, nameof(LEFT_HORIZONTAL_SCROLL)),
             new KeyValuePair<byte, string>(VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL, nameof(VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL)),
             new KeyValuePair<byte, string>(VERTICAL_AND_LEFT_HORIZONTAL_SCROLL, nameof(VERTICAL_AND_LEFT_HORIZONTAL_SCROLL)),
-            new KeyValuePair<byte, string>(SSD1306_Set_Lower_Column_Start_Address, nameof(SSD1306_Set_Lower_Column_Start_Address)),
-            new KeyValuePair<byte, string>(SSD1306_Set_Higher_Column_Start_Address, nameof(SSD1306_Set_Higher_Column_Start_Address)),
-            new KeyValuePair<byte, string>(SSD1306_Set_Start_Line, nameof(SSD1306_Set_Start_Line)),
-            new KeyValuePair<byte, string>(SH1106_Set_Page_Address, nameof(SH1106_Set_Page_Address))
+            new KeyValuePair<byte, string>(LOW_COL_ADDR, nameof(LOW_COL_ADDR)),
+            new KeyValuePair<byte, string>(HIGH_COL_ADDR, nameof(HIGH_COL_ADDR)),
+            new KeyValuePair<byte, string>(SET_PAGE_ADDRESS, nameof(SET_PAGE_ADDRESS))
         });
             
 
@@ -60,6 +62,8 @@ namespace OledI2cCore
         const byte SET_DISPLAY_OFFSET = 0xD3;
         const byte CHARGE_PUMP = 0x8D;
         const bool EXTERNAL_VCC = true;
+        const byte VCC_EXTERNAL = 0x10;
+        const byte VCC_INTERNAL = 0x14;
         const byte MEMORY_MODE = 0x20;
         const byte SEG_REMAP = 0xA1; // using 0xA0 will flip screen
         const byte COM_SCAN_DEC = 0xC8;
@@ -79,13 +83,11 @@ namespace OledI2cCore
         const byte LEFT_HORIZONTAL_SCROLL = 0x27;
         const byte VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL = 0x29;
         const byte VERTICAL_AND_LEFT_HORIZONTAL_SCROLL = 0x2A;
-        const byte SSD1306_Set_Lower_Column_Start_Address = 0x0;
-        const byte SH1106_SET_PAGE_ADDRESS = 0xB0;
-        const byte SH1106_SET_LOW_COL_ADDR = 0x00;
-        const byte SH1106_SET_HIGH_COL_ADDR = 0x10;
-        const byte SSD1306_Set_Higher_Column_Start_Address = 0x10;
-        const byte SSD1306_Set_Start_Line = 0x40;
-        const byte SH1106_Set_Page_Address = 0xB0;
+        const byte SSD1306_DISPLAYALLON_RESUME = 0xA4;
+        const byte LOW_COL_ADDR = 0x00;
+        const byte HIGH_COL_ADDR = 0x10;
+        const byte SET_PAGE_ADDRESS = 0xB0;
+        const byte SET_START_LINE = 0x40;
 
         const byte MODE_COMMAND = 0x00;
         const byte MODE_DATA = 0x40;
@@ -107,7 +109,7 @@ namespace OledI2cCore
             ScreenConfigs.Add("96x16", new ScreenConfig(0x0F, 0x2, 0));
         }
 
-        public OledCore(II2C wire, byte width = 128, byte height = 32, byte address = 0x3C, byte lineSpacing = 1, byte letterSpacing = 1, IOledLogger logger = null)
+        public OledCore(II2C wire, byte width = 128, byte height = 32, byte address = 0x3C, byte lineSpacing = 1, byte letterSpacing = 1, IOledLogger logger = null, ScreenDriver screenDriver = ScreenDriver.SSD1306)
         {
             _wire = wire;
 
@@ -117,6 +119,7 @@ namespace OledI2cCore
             LineSpacing = lineSpacing;
             LetterSpacing = letterSpacing;
             _logger = logger;
+            _screenDriver = screenDriver;
 
             _screenBuffer = new byte[this.Width * this.Height / 8];
             _logger?.Info($"Screen Buffer Size: {_screenBuffer.Length}");
@@ -142,24 +145,21 @@ namespace OledI2cCore
             // sequence of bytes to initialise with
             var initSeq = new byte[] {
                 DISPLAY_OFF,
-                SET_MULTIPLEX, _screenConfig.Multiplex, // set the last value dynamically based on screen size requirement
-                SH1106_SET_LOW_COL_ADDR | 0x00,
-                SH1106_SET_HIGH_COL_ADDR,
-                SSD1306_Set_Start_Line,
-                SH1106_Set_Page_Address,
-                SEG_REMAP | 0x1, // screen orientation
-                NORMAL_DISPLAY,
-                0xAD, // set charge pump enable
-                0x8b, // external VCC,
-                0x30, // 0X30---0X33  set VPP   9V liangdu!!!!
-                COM_SCAN_DEC, // screen orientation change to INC to flip
-                SET_DISPLAY_OFFSET, 0x00,
                 SET_DISPLAY_CLOCK_DIV, 0x80,
-                SET_PRECHARGE, 0x1f, // (EXTERNAL_VCC) ? 0x22 : 0xF1, // precharge val
+                SET_MULTIPLEX, _screenConfig.Multiplex, // set the last value dynamically based on screen size requirement
+                SET_DISPLAY_OFFSET, 0x00,
+                SET_START_LINE | 0x0,
+                CHARGE_PUMP, EXTERNAL_VCC ? VCC_EXTERNAL : VCC_INTERNAL,
+                MEMORY_MODE, 0x00,
+                SEG_REMAP | 0x1, // screen orientation
+                COM_SCAN_DEC, // screen orientation change to INC to flip
                 SET_COM_PINS, _screenConfig.ComPins, // com pins val sets dynamically to match each screen size requirement
+                SET_CONTRAST, (EXTERNAL_VCC) ? 0x9F : 0xCF, // contrast val
+                SET_PRECHARGE, (EXTERNAL_VCC) ? 0x22 : 0xF1, // precharge val
                 SET_VCOM_DETECT, 0x40, // vcom detect
-                SET_CONTRAST, 0x80, //(EXTERNAL_VCC) ? 0x9F : 0xCF, // contrast val
-                DEACTIVATE_SCROLL,
+                SSD1306_DISPLAYALLON_RESUME,
+                NORMAL_DISPLAY,
+                DISPLAY_ON
             };
 
             // write init seq commands
@@ -168,22 +168,27 @@ namespace OledI2cCore
                 TransferCommand(byteToTransfer);
             }
 
-            TransferCommand(DISPLAY_ON);
-
             ClearDisplay(true);
 
-            _logger.Info("Display on");
+            _logger?.Info("Display on");
             
         }
 
         private bool TransferData(byte[] data)
         {
             _logger?.Info("\n\n****DATA");
-            _wire.SetI2CStart();
-            var success = _wire.SendAddressAndCheckAck(_address, false)
-            && _wire.SendByte(MODE_DATA)
-            && _wire.SendBytes(data);
-            _wire.SetI2CStop();
+            try
+            {
+                _wire.SetI2CStart();
+                var success = _wire.SendAddressAndCheckAck(_address, false)
+                              && _wire.SendByte(MODE_DATA)
+                              && _wire.SendBytes(data);
+            }
+            finally
+            {
+                _wire.SetI2CStop();
+            }
+            
             return true;
         }
 
@@ -208,8 +213,8 @@ namespace OledI2cCore
             {
                 _wire.SetI2CStart();
                 return _wire.SendAddressAndCheckAck(_address, false)
-                    && _wire.SendByteAndCheckAck(MODE_COMMAND)
-                    && _wire.SendByteAndCheckAck(command);
+                       && _wire.SendByteAndCheckAck(MODE_COMMAND)
+                       && _wire.SendByteAndCheckAck(command);
             }
             finally
             {
@@ -221,6 +226,12 @@ namespace OledI2cCore
         {
             _cursorX = x;
             _cursorY = y;
+        }
+
+        public void WriteString(byte positionX, byte positionY, string message, byte size)
+        {
+            SetCursor(positionX, positionY);
+            WriteString(DefaultFont, size, message);
         }
 
         public void WriteString(IFont font, byte size, string message, byte color = 255, bool wrap = true, bool sync = false)
@@ -451,6 +462,8 @@ namespace OledI2cCore
 
         public void UpdateDirtyBytes()
         {
+            if (_dirtyBytes.Count == 0) return;
+
             var byteArray = _dirtyBytes.ToArray();
             var blen = byteArray.Length;
 
@@ -464,6 +477,8 @@ namespace OledI2cCore
             }
             else
             {
+                _logger?.Info("Update Dirty");
+                
                 bool sent = false;
 
                 // iterate through dirty bytes
@@ -474,7 +489,7 @@ namespace OledI2cCore
                     byte page = (byte)Math.Floor(((double)byteIndex / Width));
                     byte col = (byte)Math.Floor(((double)byteIndex % Width));
 
-                    sent = sh1106_go_coordinate(col, page);
+                    sent = GoCoordinate(col, page);
 
                     if (sent)
                     {
@@ -495,6 +510,8 @@ namespace OledI2cCore
 
         public void Update()
         {
+            _logger?.Info("Update All");
+
             // currently a dirty, non-performant hack - need to get this back to do something like 16 bytes at a time. 
             // TODO: circle back and resolve this issue.
             var bufferToSend = new byte[1];
@@ -506,7 +523,7 @@ namespace OledI2cCore
                     if (i % Width == 0)
                     {
                         var y = (byte) Math.Floor((i / (double) Width));
-                        var success = sh1106_go_coordinate(0, y);
+                        var success = GoCoordinate(0, y);
                         if (!success)
                         {
                             continue;
@@ -524,15 +541,21 @@ namespace OledI2cCore
             }
         }
 
-        private bool sh1106_go_coordinate(byte x, byte page)
+        private bool GoCoordinate(byte x, byte page)
         {
             if (x >= Width || page >= (Height / 8))
                 return false;
-            x += 2; //offset : panel is 128 ; RAM is 132 for sh1106
 
-            var row = (SH1106_Set_Page_Address + page);
-            var lowColumn = SH1106_SET_LOW_COL_ADDR | (x & 0xF);
-            var highColumn = (SH1106_SET_HIGH_COL_ADDR | (x >> 4));
+            switch (_screenDriver)
+            {
+                case ScreenDriver.SH1106:
+                    x += 2; //offset : panel is 128 ; RAM is 132 for sh1106
+                    break;
+            }
+
+            var row = (SET_PAGE_ADDRESS + page);
+            var lowColumn = LOW_COL_ADDR | (x & 0xF);
+            var highColumn = (HIGH_COL_ADDR | (x >> 4));
 
             return TransferCommand((byte)row) // Set row
                    && TransferCommand((byte)lowColumn)  // Set lower column address
@@ -598,6 +621,21 @@ namespace OledI2cCore
                 Update();
             }
         }
+
+        public void DrawBitmap(short x, short y, byte[] bmp, short w, short h, bool color) 
+        {
+            short byteWidth = (short)((w + 7) / 8);
+
+            for(var j=0; j<h; j++) {
+                for(var i=0; i<w; i++ ) {
+                    if((bmp[j* byteWidth + i / 8] & (128 >> (i & 7))) > 0 ) {
+                        DrawPixel((short)(x+i), (short)(y +j), 1);
+                    } else {
+                        DrawPixel((short)(x +i), (short)(y +j), 0);
+                    }
+                }
+            }
+        }
     }
     
 
@@ -630,5 +668,11 @@ namespace OledI2cCore
             Y = y;
             Color = color;
         }
+    }
+
+    public enum ScreenDriver
+    {
+        SH1106,
+        SSD1306
     }
 }

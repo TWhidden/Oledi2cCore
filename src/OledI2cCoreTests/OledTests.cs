@@ -12,6 +12,8 @@ namespace Oled_i2c_bus_core_tests
     {
         private static readonly Logger Logger = new Logger();
 
+        public const ScreenDriver DefaultTestScreenDriver = ScreenDriver.SH1106;
+
         [TestMethod]
         public void GeneralTesting()
         {
@@ -19,17 +21,18 @@ namespace Oled_i2c_bus_core_tests
 
             i2C.SetupMpsse();
 
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width:128, height: 64, logger: Logger);
+            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width:128, height: 64, logger: Logger, screenDriver: DefaultTestScreenDriver);
 
             oled.Initialise();
 
-            oled.DrawPixel((byte)(oled.Width / 2), (byte)(oled.Height / 2), 1);
+                //oled.DrawPixel((byte)(oled.Width / 2), (byte)(oled.Height / 2), 1);
 
-            oled.DrawLine(0, 20, 127, 20, 1);
+            //oled.DrawLine(0, 20, 127, 20, 1);
 
             oled.WriteString(new Oled_Font_5x7(), 2, "123456");
 
-            oled.UpdateDirtyBytes();
+            //oled.UpdateDirtyBytes();
+            oled.Update();
         }
 
 
@@ -40,7 +43,7 @@ namespace Oled_i2c_bus_core_tests
 
             i2C.SetupMpsse();
 
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width: 128, height: 64, logger: Logger);
+            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width: 128, height: 64, logger: Logger, screenDriver: DefaultTestScreenDriver);
 
             oled.Initialise();
 
@@ -55,13 +58,23 @@ namespace Oled_i2c_bus_core_tests
 
             i2C.SetupMpsse();
 
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width: 128, height: 64, logger: Logger);
+            var oled = new OledCore(new I2CWrapper2(i2C, Logger), width: 128, height: 64, logger: Logger, screenDriver: DefaultTestScreenDriver);
 
             oled.Initialise();
 
             oled.DrawLine(0, (byte)(oled.Height/2), oled.Width, (byte)(oled.Height / 2), 1, true);
 
             oled.WriteString(new Oled_Font_5x7(), 2, "H L Test", sync: true);
+        }
+
+        [TestMethod]
+        public void ScanAddresses()
+        {
+            var i2C = new FtdiI2cCore(0, Logger);
+
+            i2C.SetupMpsse();
+
+            i2C.ScanDevicesAndQuit();
         }
     }
 
