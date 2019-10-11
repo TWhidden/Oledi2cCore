@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections;
 using System.Diagnostics;
+using System.Threading;
 using FtdiCore._3rdParty;
 
 namespace FtdiCore
@@ -260,7 +262,44 @@ namespace FtdiCore
             return true;
         }
 
-        public bool SendByteRaw(byte[] bytes)
+        /// <summary>
+        /// Fully configured send. First byte should be address
+        /// Send Idea from https://raw.githubusercontent.com/gurvindrasingh/AnyI2C/master/AnyI2cLib/FT232HI2C.cs
+        /// </summary>
+        /// <param name="data"></param>
+        /// <returns></returns>
+        public bool SendBytes(params byte[] data)
+        {
+            var succeeded = false;
+            SetI2CLinesIdle();							// Set idle line condition
+            try
+            {
+                SetI2CStart(); // Send the start condition
+                if (data != null)
+                {
+                    for (int i = 0; i < data.Length; i++)
+                    {
+                        succeeded = i == 0
+                            ? SendAddressAndCheckACK((byte) data[0], false)
+                            : SendByteAndCheckACK(data[i]);
+
+                        if (!succeeded)
+                        {
+                            _logger.Info($"Send Failed");
+                            return false;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                SetI2CStop();								// Send the stop condition	
+            }
+            
+            return succeeded;
+        }
+
+        public bool SendByteRaw1(byte[] bytes)
         {
             dwNumBytesToSend = 0;           // Clear output buffer
             FTDI.FT_STATUS ftStatus = FTDI.FT_STATUS.FT_OK;
@@ -296,7 +335,7 @@ namespace FtdiCore
 
             ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
 
-            _logger.Info($"Status: {ftStatus};Sent: {bytes:X}; Send {dwNumBytesToSend}; Sent: {dwNumBytesSent}");
+            _logger.Info($"Status: {ftStatus};Sent: {bytes.Length}; Send {dwNumBytesToSend}; Total Sent: {dwNumBytesSent}");
 
             dwNumInputBuffer = 0;
             ReadTimeoutCounter = 0;
@@ -322,7 +361,7 @@ namespace FtdiCore
                                                                                                 //_logger.Info("status was %d, input was 0x%X", ftStatus, InputBuffer[0]);  
                 if (((InputBuffer[0] & 0x01) == 0x0))       //Check ACK bit 0 on data byte read out
                 {
-                    //_logger.Info("received ACK.");
+                    _logger.Info("received ACK.");
                     return true;    // Return True if the ACK was received
                 }
                 else

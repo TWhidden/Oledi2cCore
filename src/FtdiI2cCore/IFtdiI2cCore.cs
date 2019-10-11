@@ -6,6 +6,7 @@
         bool ReadByteAndSendNAK();
         bool SendByteAndCheckACK(byte dwDataSend);
         bool SendByte(byte dwDataSend);
+        bool SendBytes(byte[] data);
         bool SendAddressAndCheckACK(byte address, bool read);
         void SetI2CLinesIdle();
         void SetI2CStart();
