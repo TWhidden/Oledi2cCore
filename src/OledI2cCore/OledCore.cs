@@ -230,8 +230,6 @@ namespace OledI2cCore
         /// <returns></returns>
         private bool TransferData(byte[] data)
         {
-            _logger?.Info("\n\n****DATA");
-
             //TODO: optimize to reduce allocations
             var buffer = new byte[data.Length + 2];
             buffer[0] = _address;
@@ -249,10 +247,6 @@ namespace OledI2cCore
         /// <returns></returns>
         private bool TransferCommand(byte command)
         {
-            _logger?.Info(CommandLookup.TryGetValue(command, out var commandName)
-                ? $"\n\nSending Command {commandName}"
-                : $"\n\nSending Command {command:X}");
-
             // TODO: optimize to reduce allocations
             return _wire.SendBytes(new[] {_address, MODE_COMMAND, command});
         }
@@ -276,7 +270,7 @@ namespace OledI2cCore
         /// <param name="positionY">Y Position on the screen</param>
         /// <param name="message">Desired Message</param>
         /// <param name="size">Override of the size.</param>
-        public void WriteString(int positionX, int positionY, string message, double size = 1, int writeWidth = -1)
+        public void WriteString(int positionX, int positionY, string message, double size = 1, int writeWidth = -1, bool wrap = false)
         {
             byte x = (byte) positionX;
             byte y = (byte) positionY;
@@ -291,7 +285,7 @@ namespace OledI2cCore
                 SetCursor((byte)positionX, (byte)positionY);
             }
 
-            WriteString(DefaultFont, size, message);
+            WriteString(DefaultFont, size, message, wrap: wrap);
         }
 
         /// <summary>
@@ -546,8 +540,6 @@ namespace OledI2cCore
             }
             else
             {
-                _logger?.Info("Update Dirty");
-
                 // iterate through dirty bytes
                 for (var i = 0; i < blen; i += 1)
                 {
@@ -576,8 +568,6 @@ namespace OledI2cCore
         /// </summary>
         public void Update()
         {
-            _logger?.Info("Update All");
-
             var bufferToSend = new byte[64];
 
             for (var i = 0; i < _screenBuffer.Length;)
@@ -597,6 +587,9 @@ namespace OledI2cCore
                 {
                     i += bufferToSend.Length;
                 }
+
+            // Now that all bytes are synced, reset the dirty state
+            _dirtyBytes.Clear();
         }
 
         /// <summary>
