@@ -10,48 +10,56 @@ namespace Oled_i2c_bus_core_tests
     [TestClass]
     public class OledTests
     {
+        /// <summary>
+        /// Modify this screen driver to target the screen you are using.
+        /// </summary>
         public const ScreenDriver DefaultTestScreenDriver = ScreenDriver.SH1106;
         private static readonly Logger Logger = new Logger();
+        private const uint DeviceIndexForTesting = 0;
 
-        [TestMethod]
-        public void GeneralTesting()
+        /// <summary>
+        /// Get the Oled ready for testing.
+        /// </summary>
+        /// <returns></returns>
+        private static OledCore GetOledForTesting()
         {
-            var i2C = new FtdiI2cCore(0, Logger);
+            // Create the I2C Controller
+            var i2C = new FtdiI2cCore(DeviceIndexForTesting, Logger);
 
+            // Init the Mpsse 
             i2C.SetupMpsse();
 
+            // Create the Oled Object, with the wrapper for the I2C and the logger.
+            // Set the defaults for the testing screen used
             var oled = new OledCore(new I2CWrapper2(i2C, Logger), 128, 64, logger: Logger,
                 screenDriver: DefaultTestScreenDriver);
 
-            oled.Initialise();
+            // Init the Oled (setup params, clear display, etc)
+            var init = oled.Initialise();
+            Assert.IsTrue(init, "Oled Failed Init.");
 
-            //oled.DrawPixel((byte)(oled.Width / 2), (byte)(oled.Height / 2), 1);
+            return oled;
+        }
 
-            //oled.DrawLine(0, 20, 127, 20, 1);
-            var font = new Oled_Font_5x7();
+        [TestMethod]
+        public void TextSizesPlacement()
+        {
+            var oled = GetOledForTesting();
+
             oled.WriteString(0, 0, "My Test 1", 1.6);
             oled.WriteString(0, 13, "Another 2", 1);
-
             oled.WriteString(0, 24, "My Guess is 3", 1);
-
-            //oled.UpdateDirtyBytes();
             oled.Update();
         }
 
 
         [TestMethod]
-        public void WriteText()
+        public void TextFontObject()
         {
-            var i2C = new FtdiI2cCore(0, Logger);
-
-            i2C.SetupMpsse();
-
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), 128, 64, logger: Logger,
-                screenDriver: DefaultTestScreenDriver);
-
-            oled.Initialise();
+            var oled = GetOledForTesting();
 
             oled.SetCursor(10, 10);
+
             oled.WriteString(new Oled_Font_5x7(), 2, "1234567");
 
             oled.WriteString(5, 32, "Another Test!", 2);
@@ -60,37 +68,36 @@ namespace Oled_i2c_bus_core_tests
         }
 
         [TestMethod]
-        public void DrawLineAcrossMiddle()
+        public void LineMiddle()
         {
-            var i2C = new FtdiI2cCore(0, Logger);
-
-
-            i2C.SetupMpsse();
-
-            var oled = new OledCore(new I2CWrapper2(i2C, Logger), 128, 64, logger: Logger,
-                screenDriver: DefaultTestScreenDriver);
-
-            oled.Initialise();
-
-            //Thread.Sleep(1000);
+            var oled = GetOledForTesting();
 
             oled.DrawLine(0, (byte) (oled.Height / 2), oled.Width, (byte) (oled.Height / 2), 1);
-
-            //oled.WriteString(new Oled_Font_5x7(), 2, "H L Test");
-
-            //oled.WriteString(0, 40, "Test", 1);
 
             oled.Update();
         }
 
         [TestMethod]
-        public void ScanAddresses()
+        public void I2CScanDevices()
         {
             var i2C = new FtdiI2cCore(0, Logger);
 
             i2C.SetupMpsse();
 
             i2C.ScanDevicesAndQuit();
+        }
+
+        [TestMethod]
+        public void TextOverwriteTests()
+        {
+            var oled = GetOledForTesting();
+
+            // write text in the middle of the screen 
+            var yPlacement = oled.Height / 2;
+            oled.WriteString(0, yPlacement, "TEST 1111111");
+            oled.UpdateDirtyBytes();
+            oled.WriteString(0, yPlacement, "TEST 5", 1, oled.Width);
+            oled.UpdateDirtyBytes();
         }
     }
 

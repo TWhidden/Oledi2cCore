@@ -4,6 +4,12 @@ using System.Linq;
 
 namespace OledI2cCore
 {
+    /// <summary>
+    ///     OledCore class to manage a display.  Inspired by many source pages on github, converted from js and C++ to
+    ///     accomplish many needs.
+    ///     https://github.com/baltazorr/oled-i2c-bus/blob/master/oled.js
+    ///     https://github.com/SuperHouse/esp-open-rtos/blob/master/extras/ssd1306/ssd1306.c
+    /// </summary>
     public class OledCore
     {
         // create command buffers
@@ -35,17 +41,23 @@ namespace OledI2cCore
         private const byte LEFT_HORIZONTAL_SCROLL = 0x27;
         private const byte VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL = 0x29;
         private const byte VERTICAL_AND_LEFT_HORIZONTAL_SCROLL = 0x2A;
-        private const byte SSD1306_DISPLAYALLON_RESUME = 0xA4;
         private const byte LOW_COL_ADDR = 0x00;
         private const byte HIGH_COL_ADDR = 0x10;
         private const byte SET_PAGE_ADDRESS = 0xB0;
         private const byte SET_START_LINE = 0x40;
 
+        // Command or Data Values
         private const byte MODE_COMMAND = 0x00;
         private const byte MODE_DATA = 0x40;
 
+        /// <summary>
+        ///     Default font to be used with simple string writes
+        /// </summary>
         private static readonly Oled_Font_5x7 DefaultFont = new Oled_Font_5x7();
 
+        /// <summary>
+        ///     Command lookup for Debugging
+        /// </summary>
         private static readonly Dictionary<byte, string> CommandLookup = new Dictionary<byte, string>(
             new List<KeyValuePair<byte, string>>
             {
@@ -83,19 +95,49 @@ namespace OledI2cCore
 
         private static readonly Dictionary<string, ScreenConfig> ScreenConfigs = new Dictionary<string, ScreenConfig>();
 
+        /// <summary>
+        ///     The I2C screen index.
+        /// </summary>
         private readonly byte _address;
+
+        /// <summary>
+        ///     For performance, we will track each index of which byte needs to be updated.
+        ///     This is a set of byte indexes in the _screenBuffer object.
+        /// </summary>
         private readonly HashSet<int> _dirtyBytes = new HashSet<int>();
 
+        /// <summary>
+        ///     Logger Reference
+        /// </summary>
         private readonly IOledLogger _logger;
 
+        /// <summary>
+        ///     The buffer that holds the bytes that match the OLED.
+        /// </summary>
         private readonly byte[] _screenBuffer;
+
+        /// <summary>
+        ///     Screen Configuration used with the display
+        /// </summary>
         private readonly ScreenConfig _screenConfig;
+
+        /// <summary>
+        ///     Reference to which screen driver is being used.
+        /// </summary>
         private readonly ScreenDriver _screenDriver;
+
+        /// <summary>
+        ///     Reference to the wire interface.
+        /// </summary>
         private readonly II2C _wire;
 
+        // Current screen positions.
         private byte _cursorX;
         private byte _cursorY;
 
+        /// <summary>
+        ///     Static ctor - Populate the command screen resolutions with their config overrides per screen
+        /// </summary>
         static OledCore()
         {
             ScreenConfigs.Add("128x32", new ScreenConfig(0x1f, 0x02, 0));
@@ -108,7 +150,6 @@ namespace OledI2cCore
             byte letterSpacing = 1, IOledLogger logger = null, ScreenDriver screenDriver = ScreenDriver.SSD1306)
         {
             _wire = wire;
-
             Height = height;
             Width = width;
             _address = address;
@@ -117,6 +158,7 @@ namespace OledI2cCore
             _logger = logger;
             _screenDriver = screenDriver;
 
+            // Build the screen buffer with the passed in screen resolution
             _screenBuffer = new byte[Width * Height / 8];
             _logger?.Info($"Screen Buffer Size: {_screenBuffer.Length}");
 
@@ -142,7 +184,7 @@ namespace OledI2cCore
         public byte LineSpacing { get; }
         public byte LetterSpacing { get; }
 
-        public void Initialise()
+        public bool Initialise()
         {
             // sequence of bytes to initialise with
             var initSeq = new byte[]
@@ -162,54 +204,105 @@ namespace OledI2cCore
                 SET_CONTRAST, EXTERNAL_VCC ? 0x9F : 0xCF, // contrast val
                 SET_PRECHARGE, EXTERNAL_VCC ? 0x22 : 0xF1, // precharge val
                 SET_VCOM_DETECT, 0x40, // vcom detect
-                SSD1306_DISPLAYALLON_RESUME,
+                DISPLAY_ALL_ON_RESUME,
                 NORMAL_DISPLAY,
                 DISPLAY_ON
             };
 
+            var result = true;
+
             // write init seq commands
-            foreach (var byteToTransfer in initSeq) TransferCommand(byteToTransfer);
+            foreach (var byteToTransfer in initSeq)
+                if (!TransferCommand(byteToTransfer))
+                    result = false;
 
             ClearDisplay(true);
 
             _logger?.Info("Display on");
+
+            return result;
         }
 
+        /// <summary>
+        /// Data will be transfered with this command. This is used for things like drawing the screen
+        /// </summary>
+        /// <param name="data">data, without the address of data command.</param>
+        /// <returns></returns>
         private bool TransferData(byte[] data)
         {
             _logger?.Info("\n\n****DATA");
 
+            //TODO: optimize to reduce allocations
             var buffer = new byte[data.Length + 2];
             buffer[0] = _address;
             buffer[1] = MODE_DATA;
             Buffer.BlockCopy(data, 0, buffer, 2, data.Length);
 
-            var success = _wire.SendBytes(buffer);
-
-            return true;
+            return _wire.SendBytes(buffer);
         }
 
+        /// <summary>
+        /// Commands to be sent to the Oled. These commands are listed as constants above. Each screen
+        /// has different values for starting them up and turning them on. See reference guide for more info
+        /// </summary>
+        /// <param name="command"></param>
+        /// <returns></returns>
         private bool TransferCommand(byte command)
         {
             _logger?.Info(CommandLookup.TryGetValue(command, out var commandName)
                 ? $"\n\nSending Command {commandName}"
                 : $"\n\nSending Command {command:X}");
 
+            // TODO: optimize to reduce allocations
             return _wire.SendBytes(new[] {_address, MODE_COMMAND, command});
         }
 
-        public void SetCursor(byte x, byte y)
+        /// <summary>
+        /// Set the current drawing position on the screen.
+        /// Note - use of int to clean up usage for calculated positions, but will be cast to byte inside.
+        /// </summary>
+        /// <param name="x">Pass in the value</param>
+        /// <param name="y"></param>
+        public void SetCursor(int x, int y)
         {
-            _cursorX = x;
-            _cursorY = y;
+            _cursorX = (byte)x;
+            _cursorY = (byte)y;
         }
 
-        public void WriteString(byte positionX, byte positionY, string message, double size)
+        /// <summary>
+        /// Generic String writer
+        /// </summary>
+        /// <param name="positionX">X Position on the screen</param>
+        /// <param name="positionY">Y Position on the screen</param>
+        /// <param name="message">Desired Message</param>
+        /// <param name="size">Override of the size.</param>
+        public void WriteString(int positionX, int positionY, string message, double size = 1, int writeWidth = -1)
         {
-            SetCursor(positionX, positionY);
+            byte x = (byte) positionX;
+            byte y = (byte) positionY;
+
+            SetCursor(x, y);
+
+            if (writeWidth > 0)
+            {
+                var height = DefaultFont.Height * size + LineSpacing;
+                FillRect(x, y, (byte)writeWidth, (byte)height, 0);
+
+                SetCursor((byte)positionX, (byte)positionY);
+            }
+
             WriteString(DefaultFont, size, message);
         }
 
+        /// <summary>
+        /// Inspired by oled-i2c-bus node js project.  Will write the text string to the screen.
+        /// </summary>
+        /// <param name="font"></param>
+        /// <param name="size"></param>
+        /// <param name="message"></param>
+        /// <param name="color"></param>
+        /// <param name="wrap"></param>
+        /// <param name="sync"></param>
         public void WriteString(IFont font, double size, string message, byte color = 255, bool wrap = true,
             bool sync = false)
         {
@@ -223,7 +316,6 @@ namespace OledI2cCore
             {
                 // put the word space back in for all in between words or empty words
                 if (w < len - 1 || wordArr[w].Length != 0) wordArr[w] += ' ';
-
 
                 var stringArr = wordArr[w].ToCharArray();
                 var slen = stringArr.Length;
@@ -278,7 +370,7 @@ namespace OledI2cCore
 
 
         /// <summary>
-        ///     Get character bytes from the supplied font object in order to send to framebuffer
+        /// Get character bytes from the supplied font object in order to send to frame buffer
         /// </summary>
         /// <param name="byteArray"></param>
         /// <returns></returns>
@@ -309,6 +401,12 @@ namespace OledI2cCore
             return bitCharArr.ToArray();
         }
 
+        /// <summary>
+        /// Draw a char
+        /// </summary>
+        /// <param name="byteArray"></param>
+        /// <param name="size"></param>
+        /// <param name="sync"></param>
         public void DrawChar(byte[][] byteArray, double size, bool sync)
         {
             // take your positions...
@@ -338,8 +436,16 @@ namespace OledI2cCore
                     FillRect(xpos, ypos, (byte) size, (byte) size, color, false);
                 }
             }
+
+            // Sync if requested
+            if(sync) UpdateDirtyBytes();
         }
 
+        /// <summary>
+        /// Draw a Pixel
+        /// </summary>
+        /// <param name="pixel"></param>
+        /// <param name="sync"></param>
         public void DrawPixel(ScreenPixel pixel, bool sync = false)
         {
             DrawPixel(new[] {pixel}, sync);
@@ -349,7 +455,14 @@ namespace OledI2cCore
         {
             return (short) (1 << n);
         }
-
+        
+        /// <summary>
+        /// Draw Pixel at specific X/Y with specific color. 
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="y"></param>
+        /// <param name="color"></param>
+        /// <param name="sync"></param>
         public void DrawPixel(short x, short y, short color, bool sync = false)
         {
             if (x < 0 || x >= Width || y < 0 || y >= Height) return;
@@ -359,11 +472,8 @@ namespace OledI2cCore
 
             if (color > 0)
                 _screenBuffer[index] |= (byte) Shift(y % 8);
-            //_screenBuffer[index] = (byte)(_screenBuffer[index] | (1 << (y & 7)));
             else
                 _screenBuffer[index] &= (byte) ~Shift(y % 8);
-
-            //_screenBuffer[index] == (_screenBuffer[index] & ~(1 << (y & 7)));
 
             var changeDetected = orig != _screenBuffer[index];
 
@@ -374,6 +484,11 @@ namespace OledI2cCore
             }
         }
 
+        /// <summary>
+        /// Draw a pixel array
+        /// </summary>
+        /// <param name="pixels"></param>
+        /// <param name="sync"></param>
         public void DrawPixel(ScreenPixel[] pixels, bool sync = false)
         {
             pixels.ToList().ForEach(el =>
@@ -409,6 +524,11 @@ namespace OledI2cCore
             if (sync) UpdateDirtyBytes();
         }
 
+        /// <summary>
+        /// Simple function to update only the pixels that have changed instead of the entire
+        /// screen. If the system determines more than 1/7 of the screen is dirty
+        /// it will force a full update
+        /// </summary>
         public void UpdateDirtyBytes()
         {
             if (_dirtyBytes.Count == 0) return;
@@ -428,8 +548,6 @@ namespace OledI2cCore
             {
                 _logger?.Info("Update Dirty");
 
-                var sent = false;
-
                 // iterate through dirty bytes
                 for (var i = 0; i < blen; i += 1)
                 {
@@ -437,7 +555,7 @@ namespace OledI2cCore
                     var page = (byte) Math.Floor((double) byteIndex / Width);
                     var col = (byte) Math.Floor((double) byteIndex % Width);
 
-                    sent = GoCoordinate(col, page);
+                    var sent = GoCoordinate(col, page);
 
                     if (sent)
                     {
@@ -453,13 +571,14 @@ namespace OledI2cCore
             _dirtyBytes.Clear();
         }
 
+        /// <summary>
+        /// Fully updates the screen - This comes at a cost, but will ensure its fully written to match your current buffer
+        /// </summary>
         public void Update()
         {
             _logger?.Info("Update All");
 
-            //// currently a dirty, non-performant hack - need to get this back to do something like 16 bytes at a time. 
-            //// TODO: circle back and resolve this issue.
-            var bufferToSend = new byte[1];
+            var bufferToSend = new byte[64];
 
             for (var i = 0; i < _screenBuffer.Length;)
                 try
@@ -478,44 +597,15 @@ namespace OledI2cCore
                 {
                     i += bufferToSend.Length;
                 }
-
-
-            //var pageAddress = SET_PAGE_ADDRESS;
-            //var pixels_per_page = Width * 8;
-            //var buff = new byte[Width];
-            //var pages = Height / 8;
-
-            //for (var y = 0; y < pixels_per_page * pages; y = y + pixels_per_page)
-            //{
-            //    TransferCommand(pageAddress);
-            //    TransferCommand(0x02);
-            //    TransferCommand(0x10);
-            //    pageAddress += 1;
-
-            //    var offsets = new byte[8];
-            //    for (var i = 0; i < 8; i++)
-            //    {
-            //        offsets[0] = (byte)(y + Width * i);
-            //    }
-
-            //    for (var x = 0; x < Width; x++)
-            //    {
-            //        buff[x] = (byte)(  _screenBuffer[x + offsets[0]] & 0x01
-            //                         | _screenBuffer[x + offsets[1]] & 0x02
-            //                         | _screenBuffer[x + offsets[2]] & 0x04
-            //                         | _screenBuffer[x + offsets[3]] & 0x08
-            //                         | _screenBuffer[x + offsets[4]] & 0x10
-            //                         | _screenBuffer[x + offsets[5]] & 0x20
-            //                         | _screenBuffer[x + offsets[6]] & 0x40
-            //                         | _screenBuffer[x + offsets[7]] & 0x80
-            //                         );
-            //    }
-
-            //    TransferData(buff);
-
-            //}
         }
 
+        /// <summary>
+        /// Different screens have different positions, so calling this will set the current write position of the data before
+        /// it is sent with the TransferData command.
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="page"></param>
+        /// <returns></returns>
         private bool GoCoordinate(byte x, byte page)
         {
             if (x >= Width || page >= Height / 8)
@@ -537,16 +627,35 @@ namespace OledI2cCore
                    && TransferCommand((byte) highColumn); //Set higher column address
         }
 
-        public void FillRect(byte x, byte y, byte w, byte h, byte color, bool sync)
+        /// <summary>
+        /// Draw a Rectangle
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="y"></param>
+        /// <param name="w"></param>
+        /// <param name="h"></param>
+        /// <param name="color"></param>
+        /// <param name="sync"></param>
+        public void FillRect(byte x, byte y, byte w, byte h, byte color, bool sync = false)
         {
             // one iteration for each column of the rectangle
             for (var i = x; i < x + w; i += 1)
                 // draws a vert line
                 DrawLine(i, y, i, (byte) (y + h - 1), color);
+
             if (sync) UpdateDirtyBytes();
         }
 
-        // using Bresenham's line algorithm
+        /// <summary>
+        /// Draw a line using Bresenham's line algorithm.
+        /// https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm
+        /// </summary>
+        /// <param name="x0"></param>
+        /// <param name="y0"></param>
+        /// <param name="x1"></param>
+        /// <param name="y1"></param>
+        /// <param name="color"></param>
+        /// <param name="sync"></param>
         public void DrawLine(byte x0, byte y0, byte x1, byte y1, byte color, bool sync = false)
         {
             var dx = Math.Abs(x1 - x0);
@@ -579,21 +688,25 @@ namespace OledI2cCore
             if (sync) UpdateDirtyBytes();
         }
 
-
-        private static byte[] Combine(byte[] first, byte[] second)
-        {
-            var ret = new byte[first.Length + second.Length];
-            Buffer.BlockCopy(first, 0, ret, 0, first.Length);
-            Buffer.BlockCopy(second, 0, ret, first.Length, second.Length);
-            return ret;
-        }
-
+        /// <summary>
+        /// Clear the internal screen buffer with all zero values. Optionally Update
+        /// </summary>
+        /// <param name="sync"></param>
         public void ClearDisplay(bool sync = false)
         {
             Array.Clear(_screenBuffer, 0, _screenBuffer.Length);
             if (sync) Update();
         }
 
+        /// <summary>
+        /// Draw a bitmap array to the screen
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="y"></param>
+        /// <param name="bmp"></param>
+        /// <param name="w"></param>
+        /// <param name="h"></param>
+        /// <param name="color"></param>
         public void DrawBitmap(short x, short y, byte[] bmp, short w, short h, bool color)
         {
             var byteWidth = (short) ((w + 7) / 8);
@@ -608,6 +721,9 @@ namespace OledI2cCore
     }
 
 
+    /// <summary>
+    /// Simple Screen Configuration Container
+    /// </summary>
     internal struct ScreenConfig
     {
         public byte Multiplex { get; }
@@ -624,6 +740,9 @@ namespace OledI2cCore
         }
     }
 
+    /// <summary>
+    /// Pixel Placement Container
+    /// </summary>
     public struct ScreenPixel
     {
         public byte X { get; }
@@ -638,6 +757,9 @@ namespace OledI2cCore
         }
     }
 
+    /// <summary>
+    /// Possible Screen Drivers
+    /// </summary>
     public enum ScreenDriver
     {
         SH1106,
