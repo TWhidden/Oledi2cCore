@@ -245,10 +245,10 @@ namespace OledI2cCore
         /// </summary>
         /// <param name="command"></param>
         /// <returns></returns>
-        private bool TransferCommand(byte command)
+        private bool TransferCommand(int command)
         {
             // TODO: optimize to reduce allocations
-            return _wire.SendBytes(new[] {_address, MODE_COMMAND, command});
+            return _wire.SendBytes(new[] {_address, MODE_COMMAND, (byte)command});
         }
 
         /// <summary>
@@ -275,16 +275,19 @@ namespace OledI2cCore
             byte x = (byte) positionX;
             byte y = (byte) positionY;
 
-            SetCursor(x, y);
-
+            // If text is being overwritten in the same place, you can optionally clear it 
+            // bye providing the write with area. Otherwise, it will not be overwritten and will
+            // look funky if you write smaller text.
             if (writeWidth > 0)
             {
                 var height = DefaultFont.Height * size + LineSpacing;
-                FillRect(x, y, (byte)writeWidth, (byte)height, 0);
-
-                SetCursor((byte)positionX, (byte)positionY);
+                DrawFilledRectangle(x, y, writeWidth, (int)height, 0);
             }
 
+            // Position where the text will be written
+            SetCursor(x, y);
+
+            // push out the text to the screen buffer
             WriteString(DefaultFont, size, message, wrap: wrap);
         }
 
@@ -427,7 +430,7 @@ namespace OledI2cCore
                     // MATH! Calculating pixel size multiplier to primitively scale the font
                     xpos = (byte) (x + i * size);
                     ypos = (byte) (y + j * size);
-                    FillRect(xpos, ypos, (byte) size, (byte) size, color, false);
+                    DrawFilledRectangle(xpos, ypos, (int)size, (int)size, color, false);
                 }
             }
 
@@ -457,7 +460,7 @@ namespace OledI2cCore
         /// <param name="y"></param>
         /// <param name="color"></param>
         /// <param name="sync"></param>
-        public void DrawPixel(short x, short y, short color, bool sync = false)
+        public void DrawPixel(int x, int y, int color, bool sync = false)
         {
             if (x < 0 || x >= Width || y < 0 || y >= Height) return;
 
@@ -575,7 +578,7 @@ namespace OledI2cCore
                 {
                     if (i % Width == 0)
                     {
-                        var y = (byte) Math.Floor(i / (double) Width);
+                        var y = (byte)Math.Floor(i / (double) Width);
                         var success = GoCoordinate(0, y);
                         if (!success) continue;
                     }
@@ -599,7 +602,7 @@ namespace OledI2cCore
         /// <param name="x"></param>
         /// <param name="page"></param>
         /// <returns></returns>
-        private bool GoCoordinate(byte x, byte page)
+        private bool GoCoordinate(int x, int page)
         {
             if (x >= Width || page >= Height / 8)
                 return false;
@@ -615,9 +618,9 @@ namespace OledI2cCore
             var lowColumn = LOW_COL_ADDR | (x & 0xF);
             var highColumn = HIGH_COL_ADDR | (x >> 4);
 
-            return TransferCommand((byte) row) // Set row
-                   && TransferCommand((byte) lowColumn) // Set lower column address
-                   && TransferCommand((byte) highColumn); //Set higher column address
+            return TransferCommand(row) // Set row
+                   && TransferCommand(lowColumn) // Set lower column address
+                   && TransferCommand(highColumn); //Set higher column address
         }
 
         /// <summary>
@@ -629,12 +632,12 @@ namespace OledI2cCore
         /// <param name="h"></param>
         /// <param name="color"></param>
         /// <param name="sync"></param>
-        public void FillRect(byte x, byte y, byte w, byte h, byte color, bool sync = false)
+        public void DrawFilledRectangle(int x, int y, int w, int h, int color, bool sync = false)
         {
             // one iteration for each column of the rectangle
             for (var i = x; i < x + w; i += 1)
                 // draws a vert line
-                DrawLine(i, y, i, (byte) (y + h - 1), color);
+                DrawLine(i, y, i, y + h - 1, color);
 
             if (sync) UpdateDirtyBytes();
         }
@@ -649,7 +652,7 @@ namespace OledI2cCore
         /// <param name="y1"></param>
         /// <param name="color"></param>
         /// <param name="sync"></param>
-        public void DrawLine(byte x0, byte y0, byte x1, byte y1, byte color, bool sync = false)
+        public void DrawLine(int x0, int y0, int x1, int y1, int color, bool sync = false)
         {
             var dx = Math.Abs(x1 - x0);
             var sx = x0 < x1 ? 1 : -1;
@@ -668,13 +671,13 @@ namespace OledI2cCore
                 if (e2 > -dx)
                 {
                     err -= dy;
-                    x0 += (byte) sx;
+                    x0 += sx;
                 }
 
                 if (e2 < dy)
                 {
                     err += dx;
-                    y0 += (byte) sy;
+                    y0 += sy;
                 }
             }
 
@@ -700,16 +703,16 @@ namespace OledI2cCore
         /// <param name="w"></param>
         /// <param name="h"></param>
         /// <param name="color"></param>
-        public void DrawBitmap(short x, short y, byte[] bmp, short w, short h, bool color)
+        public void DrawBitmap(int x, int y, byte[] bmp, int w, int h, bool color)
         {
             var byteWidth = (short) ((w + 7) / 8);
 
             for (var j = 0; j < h; j++)
             for (var i = 0; i < w; i++)
                 if ((bmp[j * byteWidth + i / 8] & (128 >> (i & 7))) > 0)
-                    DrawPixel((short) (x + i), (short) (y + j), 1);
+                    DrawPixel((x + i), (y + j), 1);
                 else
-                    DrawPixel((short) (x + i), (short) (y + j), 0);
+                    DrawPixel((x + i), (y + j), 0);
         }
     }
 
