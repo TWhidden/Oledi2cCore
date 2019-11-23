@@ -26,6 +26,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Microsoft.DotNet.PlatformAbstractions;
 
 namespace FtdiCore._3rdParty
 {
@@ -43,95 +44,24 @@ namespace FtdiCore._3rdParty
         {
             string libraryToLoad = "FTD2XX.dll";
 
+            if (Environment.OSVersion.Platform == PlatformID.Unix)
+            {
+                libraryToLoad = "libftd2xx.so";
+            }
+
             if (hFTD2XXDLL == IntPtr.Zero)
             {
                 _nativeLibrary = new NativeLibraryLoader.NativeLibrary(libraryToLoad);
+                hFTD2XXDLL = _nativeLibrary.Handle;
 
-                if (_nativeLibrary.Handle == IntPtr.Zero)
+                if (hFTD2XXDLL == IntPtr.Zero)
                 {
                     throw new Exception("Could not load the FTD2XX native assembly");
                 }
 
                 FindFunctionPointers();
             }
-
-
-            //// If FTD2XX.DLL is NOT loaded already, load it
-            //if (hFTD2XXDLL == IntPtr.Zero)
-            //{
-
-
-            //    // Load our FTD2XX.DLL library
-            //    hFTD2XXDLL = LoadLibrary(@"FTD2XX.DLL");
-            //    if (hFTD2XXDLL == IntPtr.Zero)
-            //    {
-            //        // Failed to load our FTD2XX.DLL library from System32 or the application directory
-            //        // Try the same directory that this FTD2XX_NET DLL is in
-            //        Console.WriteLine("Attempting to load FTD2XX.DLL from:\n" + Path.GetDirectoryName(GetType().Assembly.Location));
-
-            //        hFTD2XXDLL = LoadLibrary(@Path.GetDirectoryName(GetType().Assembly.Location) + "\\FTD2XX.DLL");
-            //    }
-            //}
-
-            //// If we have succesfully loaded the library, get the function pointers set up
-            //if (hFTD2XXDLL != IntPtr.Zero)
-            //{
-            //    FindFunctionPointers();
-            //}
-            //else
-            //{
-            //    // Failed to load our DLL - alert the user
-            //    Console.WriteLine("Failed to load FTD2XX.DLL.  Are the FTDI drivers installed?");
-
-            //}
         }
-
-        /// <summary>
-        /// Non default constructor allowing passing of string for dll handle.
-        /// </summary>
-        //public FTDI(String path)
-        //{
-        //    // If nonstandard.DLL is NOT loaded already, load it
-        //    //if (path == "")
-        //    //    return;
-
-        //    //if (hFTD2XXDLL == IntPtr.Zero)
-        //    //{
-        //    //    // Load our nonstandard.DLL library
-        //    //    hFTD2XXDLL = LoadLibrary(path);
-        //    //    if (hFTD2XXDLL == IntPtr.Zero)
-        //    //    {
-        //    //        // Failed to load our PathToDll library
-        //    //        // Give up :(
-        //    //        Console.WriteLine("Attempting to load FTD2XX.DLL from:\n" + Path.GetDirectoryName(GetType().Assembly.Location));
-
-        //    //    }
-        //    //}
-
-        //    //// If we have succesfully loaded the library, get the function pointers set up
-        //    //if (hFTD2XXDLL != IntPtr.Zero)
-        //    //{
-        //    //    FindFunctionPointers();
-        //    //}
-        //    //else
-        //    //{
-        //    //    Console.WriteLine("Failed to load FTD2XX.DLL.  Are the FTDI drivers installed?");
-
-        //    //}
-
-        //    string libraryToLoad = "FTD2XX";
-
-        //    if (NativeLibrary.TryLoad("libraryToLoad",  out hFTD2XXDLL))
-        //    {
-        //        Console.WriteLine($"Loaded {libraryToLoad}");
-
-        //        FindFunctionPointers();
-        //    }
-        //    else
-        //    {
-        //        Console.WriteLine($"Could not load {libraryToLoad}");
-        //    }
-        //}
 
         private void FindFunctionPointers()
         {
