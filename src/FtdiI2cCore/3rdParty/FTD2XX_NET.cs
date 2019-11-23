@@ -23,7 +23,6 @@
 
 
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -42,124 +41,154 @@ namespace FtdiCore._3rdParty
         /// </summary>
         public FTDI()
         {
-            // If FTD2XX.DLL is NOT loaded already, load it
+            string libraryToLoad = "FTD2XX.dll";
+
             if (hFTD2XXDLL == IntPtr.Zero)
             {
-                // Load our FTD2XX.DLL library
-                hFTD2XXDLL = LoadLibrary(@"FTD2XX.DLL");
-                if (hFTD2XXDLL == IntPtr.Zero)
+                _nativeLibrary = new NativeLibraryLoader.NativeLibrary(libraryToLoad);
+
+                if (_nativeLibrary.Handle == IntPtr.Zero)
                 {
-                    // Failed to load our FTD2XX.DLL library from System32 or the application directory
-                    // Try the same directory that this FTD2XX_NET DLL is in
-                    Console.WriteLine("Attempting to load FTD2XX.DLL from:\n" + Path.GetDirectoryName(GetType().Assembly.Location));
-
-                    hFTD2XXDLL = LoadLibrary(@Path.GetDirectoryName(GetType().Assembly.Location) + "\\FTD2XX.DLL");
+                    throw new Exception("Could not load the FTD2XX native assembly");
                 }
-            }
 
-            // If we have succesfully loaded the library, get the function pointers set up
-            if (hFTD2XXDLL != IntPtr.Zero)
-            {
                 FindFunctionPointers();
             }
-            else
-            {
-                // Failed to load our DLL - alert the user
-                Console.WriteLine("Failed to load FTD2XX.DLL.  Are the FTDI drivers installed?");
 
-            }
+
+            //// If FTD2XX.DLL is NOT loaded already, load it
+            //if (hFTD2XXDLL == IntPtr.Zero)
+            //{
+
+
+            //    // Load our FTD2XX.DLL library
+            //    hFTD2XXDLL = LoadLibrary(@"FTD2XX.DLL");
+            //    if (hFTD2XXDLL == IntPtr.Zero)
+            //    {
+            //        // Failed to load our FTD2XX.DLL library from System32 or the application directory
+            //        // Try the same directory that this FTD2XX_NET DLL is in
+            //        Console.WriteLine("Attempting to load FTD2XX.DLL from:\n" + Path.GetDirectoryName(GetType().Assembly.Location));
+
+            //        hFTD2XXDLL = LoadLibrary(@Path.GetDirectoryName(GetType().Assembly.Location) + "\\FTD2XX.DLL");
+            //    }
+            //}
+
+            //// If we have succesfully loaded the library, get the function pointers set up
+            //if (hFTD2XXDLL != IntPtr.Zero)
+            //{
+            //    FindFunctionPointers();
+            //}
+            //else
+            //{
+            //    // Failed to load our DLL - alert the user
+            //    Console.WriteLine("Failed to load FTD2XX.DLL.  Are the FTDI drivers installed?");
+
+            //}
         }
 
         /// <summary>
         /// Non default constructor allowing passing of string for dll handle.
         /// </summary>
-        public FTDI(String path)
-        {
-            // If nonstandard.DLL is NOT loaded already, load it
-            if (path == "")
-                return;
+        //public FTDI(String path)
+        //{
+        //    // If nonstandard.DLL is NOT loaded already, load it
+        //    //if (path == "")
+        //    //    return;
 
-            if (hFTD2XXDLL == IntPtr.Zero)
-            {
-                // Load our nonstandard.DLL library
-                hFTD2XXDLL = LoadLibrary(path);
-                if (hFTD2XXDLL == IntPtr.Zero)
-                {
-                    // Failed to load our PathToDll library
-                    // Give up :(
-                    Console.WriteLine("Attempting to load FTD2XX.DLL from:\n" + Path.GetDirectoryName(GetType().Assembly.Location));
+        //    //if (hFTD2XXDLL == IntPtr.Zero)
+        //    //{
+        //    //    // Load our nonstandard.DLL library
+        //    //    hFTD2XXDLL = LoadLibrary(path);
+        //    //    if (hFTD2XXDLL == IntPtr.Zero)
+        //    //    {
+        //    //        // Failed to load our PathToDll library
+        //    //        // Give up :(
+        //    //        Console.WriteLine("Attempting to load FTD2XX.DLL from:\n" + Path.GetDirectoryName(GetType().Assembly.Location));
 
-                }
-            }
+        //    //    }
+        //    //}
 
-            // If we have succesfully loaded the library, get the function pointers set up
-            if (hFTD2XXDLL != IntPtr.Zero)
-            {
-                FindFunctionPointers();
-            }
-            else
-            {
-                Console.WriteLine("Failed to load FTD2XX.DLL.  Are the FTDI drivers installed?");
+        //    //// If we have succesfully loaded the library, get the function pointers set up
+        //    //if (hFTD2XXDLL != IntPtr.Zero)
+        //    //{
+        //    //    FindFunctionPointers();
+        //    //}
+        //    //else
+        //    //{
+        //    //    Console.WriteLine("Failed to load FTD2XX.DLL.  Are the FTDI drivers installed?");
 
-            }
-        }
+        //    //}
+
+        //    string libraryToLoad = "FTD2XX";
+
+        //    if (NativeLibrary.TryLoad("libraryToLoad",  out hFTD2XXDLL))
+        //    {
+        //        Console.WriteLine($"Loaded {libraryToLoad}");
+
+        //        FindFunctionPointers();
+        //    }
+        //    else
+        //    {
+        //        Console.WriteLine($"Could not load {libraryToLoad}");
+        //    }
+        //}
 
         private void FindFunctionPointers()
         {
             // Set up our function pointers for use through our exported methods
-            pFT_CreateDeviceInfoList = GetProcAddress(hFTD2XXDLL, "FT_CreateDeviceInfoList");
-            pFT_GetDeviceInfoDetail = GetProcAddress(hFTD2XXDLL, "FT_GetDeviceInfoDetail");
-            pFT_Open = GetProcAddress(hFTD2XXDLL, "FT_Open");
-            pFT_OpenEx = GetProcAddress(hFTD2XXDLL, "FT_OpenEx");
-            pFT_Close = GetProcAddress(hFTD2XXDLL, "FT_Close");
-            pFT_Read = GetProcAddress(hFTD2XXDLL, "FT_Read");
-            pFT_Write = GetProcAddress(hFTD2XXDLL, "FT_Write");
-            pFT_GetQueueStatus = GetProcAddress(hFTD2XXDLL, "FT_GetQueueStatus");
-            pFT_GetModemStatus = GetProcAddress(hFTD2XXDLL, "FT_GetModemStatus");
-            pFT_GetStatus = GetProcAddress(hFTD2XXDLL, "FT_GetStatus");
-            pFT_SetBaudRate = GetProcAddress(hFTD2XXDLL, "FT_SetBaudRate");
-            pFT_SetDataCharacteristics = GetProcAddress(hFTD2XXDLL, "FT_SetDataCharacteristics");
-            pFT_SetFlowControl = GetProcAddress(hFTD2XXDLL, "FT_SetFlowControl");
-            pFT_SetDtr = GetProcAddress(hFTD2XXDLL, "FT_SetDtr");
-            pFT_ClrDtr = GetProcAddress(hFTD2XXDLL, "FT_ClrDtr");
-            pFT_SetRts = GetProcAddress(hFTD2XXDLL, "FT_SetRts");
-            pFT_ClrRts = GetProcAddress(hFTD2XXDLL, "FT_ClrRts");
-            pFT_ResetDevice = GetProcAddress(hFTD2XXDLL, "FT_ResetDevice");
-            pFT_ResetPort = GetProcAddress(hFTD2XXDLL, "FT_ResetPort");
-            pFT_CyclePort = GetProcAddress(hFTD2XXDLL, "FT_CyclePort");
-            pFT_Rescan = GetProcAddress(hFTD2XXDLL, "FT_Rescan");
-            pFT_Reload = GetProcAddress(hFTD2XXDLL, "FT_Reload");
-            pFT_Purge = GetProcAddress(hFTD2XXDLL, "FT_Purge");
-            pFT_SetTimeouts = GetProcAddress(hFTD2XXDLL, "FT_SetTimeouts");
-            pFT_SetBreakOn = GetProcAddress(hFTD2XXDLL, "FT_SetBreakOn");
-            pFT_SetBreakOff = GetProcAddress(hFTD2XXDLL, "FT_SetBreakOff");
-            pFT_GetDeviceInfo = GetProcAddress(hFTD2XXDLL, "FT_GetDeviceInfo");
-            pFT_SetResetPipeRetryCount = GetProcAddress(hFTD2XXDLL, "FT_SetResetPipeRetryCount");
-            pFT_StopInTask = GetProcAddress(hFTD2XXDLL, "FT_StopInTask");
-            pFT_RestartInTask = GetProcAddress(hFTD2XXDLL, "FT_RestartInTask");
-            pFT_GetDriverVersion = GetProcAddress(hFTD2XXDLL, "FT_GetDriverVersion");
-            pFT_GetLibraryVersion = GetProcAddress(hFTD2XXDLL, "FT_GetLibraryVersion");
-            pFT_SetDeadmanTimeout = GetProcAddress(hFTD2XXDLL, "FT_SetDeadmanTimeout");
-            pFT_SetChars = GetProcAddress(hFTD2XXDLL, "FT_SetChars");
-            pFT_SetEventNotification = GetProcAddress(hFTD2XXDLL, "FT_SetEventNotification");
-            pFT_GetComPortNumber = GetProcAddress(hFTD2XXDLL, "FT_GetComPortNumber");
-            pFT_SetLatencyTimer = GetProcAddress(hFTD2XXDLL, "FT_SetLatencyTimer");
-            pFT_GetLatencyTimer = GetProcAddress(hFTD2XXDLL, "FT_GetLatencyTimer");
-            pFT_SetBitMode = GetProcAddress(hFTD2XXDLL, "FT_SetBitMode");
-            pFT_GetBitMode = GetProcAddress(hFTD2XXDLL, "FT_GetBitMode");
-            pFT_SetUSBParameters = GetProcAddress(hFTD2XXDLL, "FT_SetUSBParameters");
-            pFT_ReadEE = GetProcAddress(hFTD2XXDLL, "FT_ReadEE");
-            pFT_WriteEE = GetProcAddress(hFTD2XXDLL, "FT_WriteEE");
-            pFT_EraseEE = GetProcAddress(hFTD2XXDLL, "FT_EraseEE");
-            pFT_EE_UASize = GetProcAddress(hFTD2XXDLL, "FT_EE_UASize");
-            pFT_EE_UARead = GetProcAddress(hFTD2XXDLL, "FT_EE_UARead");
-            pFT_EE_UAWrite = GetProcAddress(hFTD2XXDLL, "FT_EE_UAWrite");
-            pFT_EE_Read = GetProcAddress(hFTD2XXDLL, "FT_EE_Read");
-            pFT_EE_Program = GetProcAddress(hFTD2XXDLL, "FT_EE_Program");
-            pFT_EEPROM_Read = GetProcAddress(hFTD2XXDLL, "FT_EEPROM_Read");
-            pFT_EEPROM_Program = GetProcAddress(hFTD2XXDLL, "FT_EEPROM_Program");
-            pFT_VendorCmdGet = GetProcAddress(hFTD2XXDLL, "FT_VendorCmdGet");
-            pFT_VendorCmdSet = GetProcAddress(hFTD2XXDLL, "FT_VendorCmdSet");
+            pFT_CreateDeviceInfoList = _nativeLibrary.LoadFunction("FT_CreateDeviceInfoList");
+            pFT_GetDeviceInfoDetail = _nativeLibrary.LoadFunction("FT_GetDeviceInfoDetail");
+            pFT_Open = _nativeLibrary.LoadFunction("FT_Open");
+            pFT_OpenEx = _nativeLibrary.LoadFunction("FT_OpenEx");
+            pFT_Close = _nativeLibrary.LoadFunction("FT_Close");
+            pFT_Read = _nativeLibrary.LoadFunction("FT_Read");
+            pFT_Write = _nativeLibrary.LoadFunction("FT_Write");
+            pFT_GetQueueStatus = _nativeLibrary.LoadFunction("FT_GetQueueStatus");
+            pFT_GetModemStatus = _nativeLibrary.LoadFunction("FT_GetModemStatus");
+            pFT_GetStatus = _nativeLibrary.LoadFunction("FT_GetStatus");
+            pFT_SetBaudRate = _nativeLibrary.LoadFunction("FT_SetBaudRate");
+            pFT_SetDataCharacteristics = _nativeLibrary.LoadFunction("FT_SetDataCharacteristics");
+            pFT_SetFlowControl = _nativeLibrary.LoadFunction("FT_SetFlowControl");
+            pFT_SetDtr = _nativeLibrary.LoadFunction("FT_SetDtr");
+            pFT_ClrDtr = _nativeLibrary.LoadFunction("FT_ClrDtr");
+            pFT_SetRts = _nativeLibrary.LoadFunction("FT_SetRts");
+            pFT_ClrRts = _nativeLibrary.LoadFunction("FT_ClrRts");
+            pFT_ResetDevice = _nativeLibrary.LoadFunction("FT_ResetDevice");
+            pFT_ResetPort = _nativeLibrary.LoadFunction("FT_ResetPort");
+            pFT_CyclePort = _nativeLibrary.LoadFunction("FT_CyclePort");
+            pFT_Rescan = _nativeLibrary.LoadFunction("FT_Rescan");
+            pFT_Reload = _nativeLibrary.LoadFunction("FT_Reload");
+            pFT_Purge = _nativeLibrary.LoadFunction("FT_Purge");
+            pFT_SetTimeouts = _nativeLibrary.LoadFunction("FT_SetTimeouts");
+            pFT_SetBreakOn = _nativeLibrary.LoadFunction("FT_SetBreakOn");
+            pFT_SetBreakOff = _nativeLibrary.LoadFunction("FT_SetBreakOff");
+            pFT_GetDeviceInfo = _nativeLibrary.LoadFunction("FT_GetDeviceInfo");
+            pFT_SetResetPipeRetryCount = _nativeLibrary.LoadFunction("FT_SetResetPipeRetryCount");
+            pFT_StopInTask = _nativeLibrary.LoadFunction("FT_StopInTask");
+            pFT_RestartInTask = _nativeLibrary.LoadFunction("FT_RestartInTask");
+            pFT_GetDriverVersion = _nativeLibrary.LoadFunction("FT_GetDriverVersion");
+            pFT_GetLibraryVersion = _nativeLibrary.LoadFunction("FT_GetLibraryVersion");
+            pFT_SetDeadmanTimeout = _nativeLibrary.LoadFunction("FT_SetDeadmanTimeout");
+            pFT_SetChars = _nativeLibrary.LoadFunction("FT_SetChars");
+            pFT_SetEventNotification = _nativeLibrary.LoadFunction("FT_SetEventNotification");
+            pFT_GetComPortNumber = _nativeLibrary.LoadFunction("FT_GetComPortNumber");
+            pFT_SetLatencyTimer = _nativeLibrary.LoadFunction("FT_SetLatencyTimer");
+            pFT_GetLatencyTimer = _nativeLibrary.LoadFunction("FT_GetLatencyTimer");
+            pFT_SetBitMode = _nativeLibrary.LoadFunction("FT_SetBitMode");
+            pFT_GetBitMode = _nativeLibrary.LoadFunction("FT_GetBitMode");
+            pFT_SetUSBParameters = _nativeLibrary.LoadFunction("FT_SetUSBParameters");
+            pFT_ReadEE = _nativeLibrary.LoadFunction("FT_ReadEE");
+            pFT_WriteEE = _nativeLibrary.LoadFunction("FT_WriteEE");
+            pFT_EraseEE = _nativeLibrary.LoadFunction("FT_EraseEE");
+            pFT_EE_UASize = _nativeLibrary.LoadFunction("FT_EE_UASize");
+            pFT_EE_UARead = _nativeLibrary.LoadFunction("FT_EE_UARead");
+            pFT_EE_UAWrite = _nativeLibrary.LoadFunction("FT_EE_UAWrite");
+            pFT_EE_Read = _nativeLibrary.LoadFunction("FT_EE_Read");
+            pFT_EE_Program = _nativeLibrary.LoadFunction("FT_EE_Program");
+            pFT_EEPROM_Read = _nativeLibrary.LoadFunction("FT_EEPROM_Read");
+            pFT_EEPROM_Program = _nativeLibrary.LoadFunction("FT_EEPROM_Program");
+            pFT_VendorCmdGet = _nativeLibrary.LoadFunction("FT_VendorCmdGet");
+            pFT_VendorCmdSet = _nativeLibrary.LoadFunction("FT_VendorCmdSet");
         }
 
         /// <summary>
@@ -168,22 +197,27 @@ namespace FtdiCore._3rdParty
         ~FTDI()
         {
             // FreeLibrary here - we should only do this if we are completely finished
-            FreeLibrary(hFTD2XXDLL);
+            _nativeLibrary.Dispose();
             hFTD2XXDLL = IntPtr.Zero;
         }
         #endregion
 
         #region LOAD_LIBRARIES
+
         /// <summary>
         /// Built-in Windows API functions to allow us to dynamically load our own DLL.
         /// Will allow us to use old versions of the DLL that do not have all of these functions available.
         /// </summary>
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr LoadLibrary(string dllToLoad);
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
-        [DllImport("kernel32.dll")]
-        private static extern bool FreeLibrary(IntPtr hModule);
+        //[DllImport("kernel32.dll")]
+        //private static extern IntPtr LoadLibrary(string dllToLoad);
+        //[DllImport("kernel32.dll")]
+        //private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
+        //[DllImport("kernel32.dll")]
+        //private static extern bool FreeLibrary(IntPtr hModule);
+
+        private static NativeLibraryLoader.NativeLibrary _nativeLibrary;
+
+
         #endregion
 
         #region DELEGATES
