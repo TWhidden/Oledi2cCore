@@ -127,7 +127,7 @@ namespace FtdiCore._3rdParty
         ~FTDI()
         {
             // FreeLibrary here - we should only do this if we are completely finished
-            _nativeLibrary.Dispose();
+            _nativeLibrary?.Dispose();
             hFTD2XXDLL = IntPtr.Zero;
         }
         #endregion
