@@ -2181,7 +2181,10 @@ namespace FtdiCore._3rdParty
 
                 // Appears that the handle value can be non-NULL on a fail, so set it explicitly
                 if (ftStatus != FT_STATUS.FT_OK)
+                {
                     ftHandle = IntPtr.Zero;
+                    Console.WriteLine($"FT Result: {ftStatus}");
+                }
 
                 if (ftHandle != IntPtr.Zero)
                 {
