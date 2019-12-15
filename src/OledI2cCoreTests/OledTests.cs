@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using FtdiCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using OledI2cCore;
@@ -98,6 +99,63 @@ namespace Oled_i2c_bus_core_tests
             oled.UpdateDirtyBytes();
             oled.WriteString(0, yPlacement, "TEST 5", 1, oled.Width);
             oled.UpdateDirtyBytes();
+        }
+
+        [TestMethod]
+        public void DrawBitmap1()
+        {
+            var oled = GetOledForTesting();
+
+            // write text in the middle of the screen 
+            var data = GetResourceBytes("bitmaps.microsoftlogo.png");
+
+            var oledImage = new OledImage(data);
+
+            var resize = oledImage.GetOledBytes(60);
+
+            oled.DrawBitmap(0, 0, resize);
+
+            oled.UpdateDirtyBytes();
+
+            Thread.Sleep(1000);
+
+            // Image reduction
+            int multiplier = 20;
+            while(multiplier > 3)
+            {
+                double percent = multiplier / 100d;
+
+                var imgWidth = (int) (oledImage.ImageWidth * percent);
+
+                resize = oledImage.GetOledBytes(imgWidth);
+
+                oled.ClearDisplay();
+
+                oled.DrawBitmap(0, 0, resize);
+
+                oled.UpdateDirtyBytes();
+
+                multiplier = multiplier - 1;
+            }
+        }
+
+        byte[] GetResourceBytes(string resourceName)
+        {
+            var assembly = GetType().Assembly;
+
+            // Core seems to have changed resource names,
+            // so hard coding the test name for now. 
+            // OLD: assembly.GetName().Name
+            var fullResourceName = string.Concat("Oled_i2c_bus_core_tests", ".", resourceName);
+
+            var names = assembly.GetManifestResourceNames();
+
+            using (var stream = assembly.GetManifestResourceStream(fullResourceName))
+            {
+                var buffer = new byte[stream.Length];
+                stream.Read(buffer, 0, (int)stream.Length);
+                return buffer;
+            }
         }
     }
 

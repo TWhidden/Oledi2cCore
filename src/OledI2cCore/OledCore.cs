@@ -702,17 +702,21 @@ namespace OledI2cCore
         /// <param name="bmp"></param>
         /// <param name="w"></param>
         /// <param name="h"></param>
-        /// <param name="color"></param>
-        public void DrawBitmap(int x, int y, byte[] bmp, int w, int h, bool color)
+        public void DrawBitmap(int x, int y, byte[] bmp, int w, int h)
         {
-            var byteWidth = (short) ((w + 7) / 8);
 
-            for (var j = 0; j < h; j++)
-            for (var i = 0; i < w; i++)
-                if ((bmp[j * byteWidth + i / 8] & (128 >> (i & 7))) > 0)
-                    DrawPixel((x + i), (y + j), 1);
-                else
-                    DrawPixel((x + i), (y + j), 0);
+            for (var i = 0; i < bmp.Length; i++)
+            {
+                var x1 = (int)Math.Floor(i % (decimal)w);
+                var y1 = (int)Math.Floor(i / (decimal)w);
+
+                DrawPixel(x1, y1, bmp[i]);
+            }
+        }
+
+        public void DrawBitmap(int x, int y, OledImageData image)
+        {
+            DrawBitmap(x, y, image.ImageData, image.Width, image.Height);
         }
     }
 

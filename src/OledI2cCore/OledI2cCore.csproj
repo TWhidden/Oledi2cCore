@@ -6,4 +6,9 @@
     <AssemblyName>OledI2cCore</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="1.68.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="1.68.1" />
+  </ItemGroup>
+
 </Project>
