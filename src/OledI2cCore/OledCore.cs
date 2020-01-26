@@ -697,20 +697,19 @@ namespace OledI2cCore
         /// <summary>
         /// Draw a bitmap array to the screen
         /// </summary>
-        /// <param name="x"></param>
-        /// <param name="y"></param>
-        /// <param name="bmp"></param>
-        /// <param name="w"></param>
-        /// <param name="h"></param>
+        /// <param name="x">x position offset</param>
+        /// <param name="y">y position offset</param>
+        /// <param name="bmp">bitmap byte data</param>
+        /// <param name="w">width of the image</param>
+        /// <param name="h">height of the image</param>
         public void DrawBitmap(int x, int y, byte[] bmp, int w, int h)
         {
-
             for (var i = 0; i < bmp.Length; i++)
             {
                 var x1 = (int)Math.Floor(i % (decimal)w);
                 var y1 = (int)Math.Floor(i / (decimal)w);
 
-                DrawPixel(x1, y1, bmp[i]);
+                DrawPixel(x1 + x, y1 + y, bmp[i]);
             }
         }
 

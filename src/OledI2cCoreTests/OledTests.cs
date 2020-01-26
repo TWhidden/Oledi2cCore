@@ -102,7 +102,7 @@ namespace Oled_i2c_bus_core_tests
         }
 
         [TestMethod]
-        public void DrawBitmap1()
+        public void DrawBitmapAnimate()
         {
             var oled = GetOledForTesting();
 
@@ -111,23 +111,15 @@ namespace Oled_i2c_bus_core_tests
 
             var oledImage = new OledImage(data);
 
-            var resize = oledImage.GetOledBytes(60);
-
-            oled.DrawBitmap(0, 0, resize);
-
-            oled.UpdateDirtyBytes();
-
-            Thread.Sleep(1000);
-
             // Image reduction
             int multiplier = 20;
-            while(multiplier > 3)
+            while(multiplier > 5)
             {
-                double percent = multiplier / 100d;
+                var percent = multiplier / 100d;
 
                 var imgWidth = (int) (oledImage.ImageWidth * percent);
 
-                resize = oledImage.GetOledBytes(imgWidth);
+                var resize = oledImage.GetOledBytesMaxWidth(imgWidth);
 
                 oled.ClearDisplay();
 
@@ -137,6 +129,58 @@ namespace Oled_i2c_bus_core_tests
 
                 multiplier = multiplier - 1;
             }
+        }
+
+
+        [TestMethod]
+        public void DrawBitmapMaxWidth()
+        {
+            var oled = GetOledForTesting();
+
+            // write text in the middle of the screen 
+            var data = GetResourceBytes("bitmaps.microsoftlogo.png");
+
+            var oledImage = new OledImage(data);
+
+            var resize = oledImage.GetOledBytesMaxWidth(85);
+
+            oled.DrawBitmap(0, 0, resize);
+
+            oled.UpdateDirtyBytes();
+        }
+
+        [TestMethod]
+        public void DrawBitmapMaxHeight()
+        {
+            var oled = GetOledForTesting();
+
+            // write text in the middle of the screen 
+            var data = GetResourceBytes("bitmaps.microsoftlogo.png");
+
+            var oledImage = new OledImage(data);
+
+            var resize = oledImage.GetOledBytesMaxHeight(40);
+
+            oled.DrawBitmap(0, 0, resize);
+
+            oled.UpdateDirtyBytes();
+        }
+
+        [TestMethod]
+        public void DrawBitmapMaxHeightHigh()
+        {
+            var oled = GetOledForTesting();
+
+            // write text in the middle of the screen 
+            var data = GetResourceBytes("bitmaps.microsoftlogo.png");
+
+            var oledImage = new OledImage(data);
+
+            var resize = oledImage.GetOledBytesMaxSize(128, 64);
+
+            oled.DrawBitmap(0, 0, resize);
+
+            oled.UpdateDirtyBytes();
         }
 
         byte[] GetResourceBytes(string resourceName)
