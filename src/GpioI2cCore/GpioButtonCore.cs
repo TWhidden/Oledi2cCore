@@ -43,9 +43,9 @@ namespace GpioI2cCore
                 Debug.WriteLine($"State: {result}");
 
             }
-            catch (Exception ex)
+            catch
             {
-                
+                // Ignore
             }
         }
 

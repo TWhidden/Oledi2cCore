@@ -69,11 +69,11 @@ namespace FtdiCore
         uint dwNumInputBuffer = 0;     // Number of bytes which we want to read
         uint dwNumBytesRead = 0;       // Number of bytes actually read
         uint ReadTimeoutCounter = 0;       // Used as a software timeout counter when the code checks the Queue Status
-        uint dwCount = 0;
+        //uint dwCount = 0;
 
         byte[] ByteDataRead = new byte[15];          // Array for storing the data which was read from the I2C Slave
-        bool DataInBuffer = false;         // Flag which code sets when the GetNumBytesAvailable returned is > 0 
-        byte DataByte = 0;          // Used to store data bytes read from and written to the I2C Slave
+        //bool DataInBuffer = false;         // Flag which code sets when the GetNumBytesAvailable returned is > 0 
+        //byte DataByte = 0;          // Used to store data bytes read from and written to the I2C Slave
 
         // I2C FUNCTIONS
 
