@@ -270,7 +270,7 @@ namespace OledI2cCore
         /// <param name="positionY">Y Position on the screen</param>
         /// <param name="message">Desired Message</param>
         /// <param name="size">Override of the size.</param>
-        public void WriteString(int positionX, int positionY, string message, double size = 1, int writeWidth = -1, bool wrap = false)
+        public void WriteString(int positionX, int positionY, string message, double size = 1, int writeWidth = -1, bool wrap = false, bool inverseColor = false)
         {
             byte x = (byte) positionX;
             byte y = (byte) positionY;
@@ -281,14 +281,14 @@ namespace OledI2cCore
             if (writeWidth > 0)
             {
                 var height = DefaultFont.Height * size + LineSpacing;
-                DrawFilledRectangle(x, y, writeWidth, (int)height, 0);
+                DrawFilledRectangle(x, y, writeWidth, (int)height, inverseColor ? ScreenColor.White : ScreenColor.Black);
             }
 
             // Position where the text will be written
             SetCursor(x, y);
 
             // push out the text to the screen buffer
-            WriteString(DefaultFont, size, message, wrap: wrap);
+            WriteString(DefaultFont, size, message, wrap: wrap, inverseColor: inverseColor);
         }
 
         /// <summary>
@@ -300,7 +300,7 @@ namespace OledI2cCore
         /// <param name="color"></param>
         /// <param name="wrap"></param>
         /// <param name="sync"></param>
-        public void WriteString(IFont font, double size, string message, byte color = 255, bool wrap = true,
+        public void WriteString(IFont font, double size, string message, bool inverseColor = false, bool wrap = true,
             bool sync = false)
         {
             var wordArr = message.Split(new[] {' '}, StringSplitOptions.RemoveEmptyEntries);
@@ -344,7 +344,7 @@ namespace OledI2cCore
 
                         var charBytes = ReadCharBytes(charBuf);
                         // draw the entire character
-                        DrawChar(charBytes, size, false);
+                        DrawChar(charBytes, size, false, inverseColor: inverseColor);
 
                         // calc new x position for the next char, add a touch of padding too if it's a non space char
                         //padding = (stringArr[i] === ' ') ? 0 : this.LetterSpacing;
@@ -404,7 +404,8 @@ namespace OledI2cCore
         /// <param name="byteArray"></param>
         /// <param name="size"></param>
         /// <param name="sync"></param>
-        public void DrawChar(byte[][] byteArray, double size, bool sync)
+        /// <param name="inverseColor">Invert the color</param>
+        public void DrawChar(byte[][] byteArray, double size, bool sync, bool inverseColor)
         {
             // take your positions...
             var x = _cursorX;
@@ -416,6 +417,17 @@ namespace OledI2cCore
             {
                 // pull color out
                 var color = byteArray[i][j];
+
+                ScreenColor screenColor;
+                if (inverseColor)
+                {
+                    screenColor = color > 0 ? ScreenColor.Black : ScreenColor.White;
+                }
+                else
+                {
+                    screenColor = color == 0 ? ScreenColor.Black : ScreenColor.White;
+                }
+
                 byte xpos;
                 byte ypos;
                 // standard font size
@@ -423,14 +435,14 @@ namespace OledI2cCore
                 {
                     xpos = (byte) (x + i);
                     ypos = (byte) (y + j);
-                    DrawPixel(new ScreenPixel(xpos, ypos, color));
+                    DrawPixel(new ScreenPixel(xpos, ypos, screenColor));
                 }
                 else
                 {
                     // MATH! Calculating pixel size multiplier to primitively scale the font
                     xpos = (byte) (x + i * size);
                     ypos = (byte) (y + j * size);
-                    DrawFilledRectangle(xpos, ypos, (int)size, (int)size, color, false);
+                    DrawFilledRectangle(xpos, ypos, (int)size, (int)size, screenColor, false);
                 }
             }
 
@@ -460,14 +472,14 @@ namespace OledI2cCore
         /// <param name="y"></param>
         /// <param name="color"></param>
         /// <param name="sync"></param>
-        public void DrawPixel(int x, int y, int color, bool sync = false)
+        public void DrawPixel(int x, int y, ScreenColor color, bool sync = false)
         {
             if (x < 0 || x >= Width || y < 0 || y >= Height) return;
 
             var index = x + y / 8 * Width;
             var orig = _screenBuffer[index];
 
-            if (color > 0)
+            if (color == ScreenColor.White)
                 _screenBuffer[index] |= (byte) Shift(y % 8);
             else
                 _screenBuffer[index] &= (byte) ~Shift(y % 8);
@@ -632,7 +644,7 @@ namespace OledI2cCore
         /// <param name="h"></param>
         /// <param name="color"></param>
         /// <param name="sync"></param>
-        public void DrawFilledRectangle(int x, int y, int w, int h, int color, bool sync = false)
+        public void DrawFilledRectangle(int x, int y, int w, int h, ScreenColor color, bool sync = false)
         {
             // one iteration for each column of the rectangle
             for (var i = x; i < x + w; i += 1)
@@ -652,7 +664,7 @@ namespace OledI2cCore
         /// <param name="y1"></param>
         /// <param name="color"></param>
         /// <param name="sync"></param>
-        public void DrawLine(int x0, int y0, int x1, int y1, int color, bool sync = false)
+        public void DrawLine(int x0, int y0, int x1, int y1, ScreenColor color, bool sync = false)
         {
             var dx = Math.Abs(x1 - x0);
             var sx = x0 < x1 ? 1 : -1;
@@ -709,7 +721,7 @@ namespace OledI2cCore
                 var x1 = (int)Math.Floor(i % (decimal)w);
                 var y1 = (int)Math.Floor(i / (decimal)w);
 
-                DrawPixel(x1 + x, y1 + y, bmp[i]);
+                DrawPixel(x1 + x, y1 + y, (bmp[i] > 0 ? ScreenColor.White : ScreenColor.Black));
             }
         }
 
@@ -746,9 +758,9 @@ namespace OledI2cCore
     {
         public byte X { get; }
         public byte Y { get; }
-        public byte Color { get; }
+        public ScreenColor Color { get; }
 
-        public ScreenPixel(byte x, byte y, byte color)
+        public ScreenPixel(byte x, byte y, ScreenColor color)
         {
             X = x;
             Y = y;
@@ -763,5 +775,11 @@ namespace OledI2cCore
     {
         SH1106,
         SSD1306
+    }
+
+    public enum ScreenColor : byte
+    {
+        Black = 0,
+        White = 255
     }
 }
