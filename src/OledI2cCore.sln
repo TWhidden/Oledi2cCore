@@ -13,6 +13,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GpioI2cCoreTests", "GpioI2c
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GpioI2cCore", "GpioI2cCore\GpioI2cCore.csproj", "{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FtdiCore.Tests", "FtdiCore.Tests\FtdiCore.Tests.csproj", "{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

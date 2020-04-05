@@ -1,43 +1,32 @@
 ﻿using System;
-using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
+using System.Timers;
 using FtdiCore._3rdParty;
+using Timer = System.Timers.Timer;
 
 namespace FtdiCore
 {
     public class FtdiI2cCore : IFtdiI2cCore
     {
-        private readonly ILogger _logger;
+        private static readonly ConcurrentDictionary<uint, List<Func<bool>>> InitCommands =
+            new ConcurrentDictionary<uint, List<Func<bool>>>();
+
+        private readonly Timer _autoReconnectTimer = new Timer();
+        private readonly byte[] _byteDataRead = new byte[15]; // Array for storing the data which was read from the I2C Slave
+        private FTDI _ftdiDevice = null;
         private readonly byte _gpioDMask;
+        private readonly byte[] _inputBuffer = new byte[2048]; // Buffer to hold Data bytes read from FT232H
+        private readonly ILogger _logger;
+        private bool _initialized = false; // Holds record if this has been initilized, so a re-init can be performed in a different manor.
 
-        public uint DeviceIndex { get; }
+        // I2C FUNCTIONS
 
-
-        /// <summary>
-        /// The I2C can be used with GPIO, but the GPIO pins need to bet setup with their
-        /// directions (in/out).  Use this mask durint Init to setup.
-        /// Note, Pins 0-2 are reserved on the FT232 for I2C
-        /// </summary>
-        /// <param name="deviceIndex"></param>
-        /// <param name="logger"></param>
-        /// <param name="gpioMask"></param>
-        public FtdiI2cCore(uint deviceIndex, ILogger logger, byte gpioDMask = 0)
-        {
-            _logger = logger;
-
-            var maskExcludingReservedDPins = 0x1F;
-            var maskIncludingDefaultDPins = 0xC0;
-
-            gpioDMask = (byte)(gpioDMask & maskExcludingReservedDPins);
-            gpioDMask = (byte) (gpioDMask | maskIncludingDefaultDPins);
-
-            _gpioDMask = gpioDMask;
-
-            DeviceIndex = deviceIndex;
-        }
-
-        FTDI _ftdiDevice = new FTDI();
+        // Prevent allocations
+        private readonly FTDI.FT_DEVICE_INFO_NODE[] _nodeBuffer = new FTDI.FT_DEVICE_INFO_NODE[10];
+        private readonly byte[] _outputBuffer = new byte[2048]; // Buffer to hold MPSSE commands and data to be sent to FT232H
 
         // #########################################################################################
         // FT232H I2C BUS SCAN
@@ -50,33 +39,111 @@ namespace FtdiCore
         // #include <stdio.h>
         // #include "ftd2xx.h"
 
-        int bCommandEchod = 0;
+        private int _bCommandEchod;
+        private uint _dwNumBytesRead; // Number of bytes actually read
+        private uint _dwNumBytesSent; // Holds number of bytes actually sent (returned by the read function)
+        private uint _dwNumBytesToSend; // Counter used to hold number of bytes to be sent
+        private uint _dwNumInputBuffer; // Number of bytes which we want to read
 
         //        // ###### Driver defines ######
-        FTDI.FT_STATUS ftStatus;         // Status defined in D2XX to indicate operation result
-
-        byte[] OutputBuffer = new byte[2048];        // Buffer to hold MPSSE commands and data to be sent to FT232H
-        byte[] InputBuffer = new byte[2048];         // Buffer to hold Data bytes read from FT232H
+        private FTDI.FT_STATUS _ftStatus; // Status defined in D2XX to indicate operation result
+        private bool _initCheckExecuting;
+        private uint _readTimeoutCounter; // Used as a software timeout counter when the code checks the Queue Status
+        private bool _ready;
 
         //uint dwClockDivisor = 0x32;
         //faster one crashes device or something
-        uint dwClockDivisor = 0xC8;      // 100khz -- 60mhz / ((1+dwClockDivisor)*2) = clock speed in mhz
-                                          //uint dwClockDivisor = 0x012B;
+        private readonly uint dwClockDivisor = 0xC8; // 100khz -- 60mhz / ((1+dwClockDivisor)*2) = clock speed in mhz
 
-        uint dwNumBytesToSend = 0;         // Counter used to hold number of bytes to be sent
-        uint dwNumBytesSent = 0;       // Holds number of bytes actually sent (returned by the read function)
+        /// <summary>
+        ///     The I2C can be used with GPIO, but the GPIO pins need to bet setup with their
+        ///     directions (in/out).  Use this mask durint Init to setup.
+        ///     Note, Pins 0-2 are reserved on the FT232 for I2C
+        /// </summary>
+        /// <param name="deviceIndex"></param>
+        /// <param name="logger"></param>
+        /// <param name="gpioMask"></param>
+        public FtdiI2cCore(uint deviceIndex, ILogger logger, byte gpioDMask = 0)
+        {
+            _logger = logger;
 
-        uint dwNumInputBuffer = 0;     // Number of bytes which we want to read
-        uint dwNumBytesRead = 0;       // Number of bytes actually read
-        uint ReadTimeoutCounter = 0;       // Used as a software timeout counter when the code checks the Queue Status
-        //uint dwCount = 0;
+            // Create the backing API object
+            CreateDevice();
 
-        byte[] ByteDataRead = new byte[15];          // Array for storing the data which was read from the I2C Slave
-        //bool DataInBuffer = false;         // Flag which code sets when the GetNumBytesAvailable returned is > 0 
-        //byte DataByte = 0;          // Used to store data bytes read from and written to the I2C Slave
+            var maskExcludingReservedDPins = 0x1F;
+            var maskIncludingDefaultDPins = 0xC0;
 
-        // I2C FUNCTIONS
+            gpioDMask = (byte) (gpioDMask & maskExcludingReservedDPins);
+            gpioDMask = (byte) (gpioDMask | maskIncludingDefaultDPins);
 
+            _gpioDMask = gpioDMask;
+
+            DeviceIndex = deviceIndex;
+        }
+
+        private void CreateDevice()
+        {
+            _ftdiDevice?.Close();
+            _ftdiDevice = new FTDI(_logger);
+        }
+
+        public uint DeviceIndex { get; }
+
+        /// <summary>
+        ///     Register init execution plans for when a device is first initialized.
+        /// </summary>
+        /// <param name="execute"></param>
+        public void InitCommandRegister(Func<bool> execute)
+        {
+            var collection = InitCommands.GetOrAdd(DeviceIndex, x => new List<Func<bool>>());
+
+            // Add to the startup Execution
+            collection.Add(execute);
+        }
+
+        /// <summary>
+        ///     Removes all the init commands
+        /// </summary>
+        public void InitCommandReset()
+        {
+            var collection = InitCommands.GetOrAdd(DeviceIndex, x => new List<Func<bool>>());
+            collection.Clear();
+        }
+
+        public void InitAutoReconnectStart()
+        {
+            _autoReconnectTimer.Stop();
+
+            // Immediate Attempt to init.
+            InitReconnectImpl();
+
+            _autoReconnectTimer.Elapsed += _autoReconnectTimer_Elapsed;
+            _autoReconnectTimer.Interval = 1000; // Recheck every 1000 ms that its connected.
+            _autoReconnectTimer.Start();
+        }
+
+        public void InitAutoReconnectStop()
+        {
+            _autoReconnectTimer?.Stop();
+        }
+
+        public event EventHandler<bool> FtdiInitializeStateChanged;
+
+        public bool Ready
+        {
+            get => _ready;
+            set
+            {
+                // Hold a copy of previous value
+                var v = _ready;
+
+                // Set new value
+                _ready = value;
+
+                // Check if value changed for event state changed
+                if (v != value) OnFtdiInitializeStateChanged(value);
+            }
+        }
 
         // ####################################################################################################################
         // Function to read 1 byte from the I2C slave
@@ -87,25 +154,24 @@ namespace FtdiCore
         // the first byte of data, to tell the slave we dont want to read any more bytes. 
         // The one byte of data read from the I2C Slave is put into ByteDataRead[0]
         // ####################################################################################################################
-
         public bool ReadByteAndSendNAK()
         {
-            dwNumBytesToSend = 0;                           // Clear output buffer
+            _dwNumBytesToSend = 0; // Clear output buffer
 
             // Clock one byte of data in...
-            OutputBuffer[dwNumBytesToSend++] = 0x20;        // Command to clock data byte in on the clock rising edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // Length (low)
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // Length (high)   Length 0x0000 means clock ONE byte in 
+            _outputBuffer[_dwNumBytesToSend++] = 0x20; // Command to clock data byte in on the clock rising edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Length (low)
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Length (high)   Length 0x0000 means clock ONE byte in 
 
             // Now clock out one bit (the ACK/NAK bit). This bit has value '1' to send a NAK to the I2C Slave
-            OutputBuffer[dwNumBytesToSend++] = 0x13;        // Command to clock data bits out on clock falling edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // Length of 0x00 means clock out ONE bit
-            OutputBuffer[dwNumBytesToSend++] = 0xFF;        // Command will send bit 7 of this byte, we send a '1' here
+            _outputBuffer[_dwNumBytesToSend++] = 0x13; // Command to clock data bits out on clock falling edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Length of 0x00 means clock out ONE bit
+            _outputBuffer[_dwNumBytesToSend++] = 0xFF; // Command will send bit 7 of this byte, we send a '1' here
 
             // Put I2C line back to idle (during transfer) state... Clock line driven low, Data line high (open drain)
-            OutputBuffer[dwNumBytesToSend++] = 0x80;        // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
-            OutputBuffer[dwNumBytesToSend++] = 0x1A;        // gpo1, rst, and data high 00111011 
-            OutputBuffer[dwNumBytesToSend++] = 0x3B;        // 00111011
+            _outputBuffer[_dwNumBytesToSend++] = 0x80; // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
+            _outputBuffer[_dwNumBytesToSend++] = 0x1A; // gpo1, rst, and data high 00111011 
+            _outputBuffer[_dwNumBytesToSend++] = 0x3B; // 00111011
 
             // AD0 (SCL) is output driven low
             // AD1 (DATA OUT) is output high (open drain)
@@ -113,41 +179,42 @@ namespace FtdiCore
             // AD3 to AD7 are inputs driven high (not used in this application)
 
             // This command then tells the MPSSE to send any results gathered back immediately
-            OutputBuffer[dwNumBytesToSend++] = 0x87;        // Send answer back immediate command
+            _outputBuffer[_dwNumBytesToSend++] = 0x87; // Send answer back immediate command
 
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     // Send off the commands to the FT232H
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend,
+                ref _dwNumBytesSent); // Send off the commands to the FT232H
 
             // ===============================================================
             // Now wait for the byte which we read to come back to the host PC
             // ===============================================================
 
-            dwNumInputBuffer = 0;
-            ReadTimeoutCounter = 0;
+            _dwNumInputBuffer = 0;
+            _readTimeoutCounter = 0;
 
-            ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer);  // Get number of bytes in the input buffer
+            _ftStatus =
+                _ftdiDevice.GetRxBytesAvailable(ref _dwNumInputBuffer); // Get number of bytes in the input buffer
 
-            while ((dwNumInputBuffer < 1) && (ftStatus == FTDI.FT_STATUS.FT_OK) && (ReadTimeoutCounter < 500))
+            while (_dwNumInputBuffer < 1 && _ftStatus == FTDI.FT_STATUS.FT_OK && _readTimeoutCounter < 500)
             {
                 // Sit in this loop until
                 // (1) we receive the one byte expected
                 // or (2) a hardware error occurs causing the GetQueueStatus to return an error code
                 // or (3) we have checked 500 times and the expected byte is not coming 
-                ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer);  // Get number of bytes in the input buffer
-                ReadTimeoutCounter++;
+                _ftStatus =
+                    _ftdiDevice.GetRxBytesAvailable(ref _dwNumInputBuffer); // Get number of bytes in the input buffer
+                _readTimeoutCounter++;
             }
 
             // If the loop above exited due to the byte coming back (not an error code and not a timeout)
             // then read the byte available and return True to indicate success
-            if ((ftStatus == FTDI.FT_STATUS.FT_OK) && (ReadTimeoutCounter < 500))
+            if (_ftStatus == FTDI.FT_STATUS.FT_OK && _readTimeoutCounter < 500)
             {
-                ftStatus = _ftdiDevice.Read(InputBuffer, dwNumInputBuffer, ref dwNumBytesRead); // Now read the data
-                ByteDataRead[0] = InputBuffer[0];               // return the data read in the global array ByteDataRead
-                return true;                            // Indicate success
+                _ftStatus = _ftdiDevice.Read(_inputBuffer, _dwNumInputBuffer, ref _dwNumBytesRead); // Now read the data
+                _byteDataRead[0] = _inputBuffer[0]; // return the data read in the global array ByteDataRead
+                return true; // Indicate success
             }
-            else
-            {
-                return false;                           // Failed to get any data back or got an error code back
-            }
+
+            return false; // Failed to get any data back or got an error code back
         }
 
         // ##############################################################################################################
@@ -160,221 +227,141 @@ namespace FtdiCore
 
         public bool SendByteAndCheckACK(byte dwDataSend)
         {
-            dwNumBytesToSend = 0;           // Clear output buffer
-            FTDI.FT_STATUS ftStatus = FTDI.FT_STATUS.FT_OK;
+            _dwNumBytesToSend = 0; // Clear output buffer
+            var ftStatus = FTDI.FT_STATUS.FT_OK;
 
-            OutputBuffer[dwNumBytesToSend++] = 0x11;        // command to clock data bytes out MSB first on clock falling edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // 
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // Data length of 0x0000 means 1 byte data to clock out
-            OutputBuffer[dwNumBytesToSend++] = dwDataSend;  // Actual byte to clock out
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x11; // command to clock data bytes out MSB first on clock falling edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // 
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Data length of 0x0000 means 1 byte data to clock out
+            _outputBuffer[_dwNumBytesToSend++] = dwDataSend; // Actual byte to clock out
 
             // Put I2C line back to idle (during transfer) state... Clock line driven low, Data line high (open drain)
-            OutputBuffer[dwNumBytesToSend++] = 0x80;        // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
-            OutputBuffer[dwNumBytesToSend++] = 0x1A;        // Set the value of the pins (only affects those set as output)
-            OutputBuffer[dwNumBytesToSend++] = 0x3B;        // Set the directions - all pins as output except Bit2(data_in)
+            _outputBuffer[_dwNumBytesToSend++] = 0x80; // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
+            _outputBuffer[_dwNumBytesToSend++] = 0x1A; // Set the value of the pins (only affects those set as output)
+            _outputBuffer[_dwNumBytesToSend++] = 0x3B; // Set the directions - all pins as output except Bit2(data_in)
 
             // AD0 (SCL) is output driven low
             // AD1 (DATA OUT) is output high (open drain)
             // AD2 (DATA IN) is input (therefore the output value specified is ignored)
             // AD3 to AD7 are inputs driven high (not used in this application)
 
-            OutputBuffer[dwNumBytesToSend++] = 0x22;    // Command to clock in bits MSB first on clock rising edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;    // Length of 0x00 means to scan in 1 bit
+            _outputBuffer[_dwNumBytesToSend++] = 0x22; // Command to clock in bits MSB first on clock rising edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Length of 0x00 means to scan in 1 bit
 
             // This command then tells the MPSSE to send any results gathered back immediately
-            OutputBuffer[dwNumBytesToSend++] = 0x87;    //Send answer back immediate command
+            _outputBuffer[_dwNumBytesToSend++] = 0x87; //Send answer back immediate command
 
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
-                                                                                                //_logger.Info("Byte Sent, waiting for ACK...");    
-                                                                                                // ===============================================================
-                                                                                                // Now wait for the byte which we read to come back to the host PC
-                                                                                                // ===============================================================
+            ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend, ref _dwNumBytesSent); //Send off the commands
+            //_logger.Info("Byte Sent, waiting for ACK...");    
+            // ===============================================================
+            // Now wait for the byte which we read to come back to the host PC
+            // ===============================================================
 
-            dwNumInputBuffer = 0;
-            ReadTimeoutCounter = 0;
+            _dwNumInputBuffer = 0;
+            _readTimeoutCounter = 0;
 
-            ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer);  // Get number of bytes in the input buffer
+            ftStatus = _ftdiDevice.GetRxBytesAvailable(
+                ref _dwNumInputBuffer); // Get number of bytes in the input buffer
 
-            while ((dwNumInputBuffer < 1) && (ftStatus == FTDI.FT_STATUS.FT_OK) && (ReadTimeoutCounter < 5500))
+            while (_dwNumInputBuffer < 1 && ftStatus == FTDI.FT_STATUS.FT_OK && _readTimeoutCounter < 5500)
             {
                 // Sit in this loop until
                 // (1) we receive the one byte expected
                 // or (2) a hardware error occurs causing the GetQueueStatus to return an error code
                 // or (3) we have checked 500 times and the expected byte is not coming 
-                ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer);  // Get number of bytes in the input buffer
-                                                                            //_logger.Info("counter: %d, bytes: %d, ftStatus: %d", ReadTimeoutCounter, dwNumInputBuffer, ftStatus);
-                ReadTimeoutCounter++;
+                ftStatus = _ftdiDevice.GetRxBytesAvailable(
+                    ref _dwNumInputBuffer); // Get number of bytes in the input buffer
+                //_logger.Info("counter: %d, bytes: %d, ftStatus: %d", ReadTimeoutCounter, dwNumInputBuffer, ftStatus);
+                _readTimeoutCounter++;
             }
 
             // If the loop above exited due to the byte coming back (not an error code and not a timeout)
 
-            if ((ftStatus == FTDI.FT_STATUS.FT_OK) && (ReadTimeoutCounter < 2500))
+            if (ftStatus == FTDI.FT_STATUS.FT_OK && _readTimeoutCounter < 2500)
             {
-                ftStatus = _ftdiDevice.Read(InputBuffer, dwNumInputBuffer, ref dwNumBytesRead); // Now read the data
-                                                                                               //_logger.Info("status was %d, input was 0x%X", ftStatus, InputBuffer[0]);  
-                if (((InputBuffer[0] & 0x01) == 0x0))       //Check ACK bit 0 on data byte read out
-                {
+                ftStatus = _ftdiDevice.Read(_inputBuffer, _dwNumInputBuffer, ref _dwNumBytesRead); // Now read the data
+                //_logger.Info("status was %d, input was 0x%X", ftStatus, InputBuffer[0]);  
+                if ((_inputBuffer[0] & 0x01) == 0x0) //Check ACK bit 0 on data byte read out
                     //_logger.Info("received ACK.");
-                    return true;    // Return True if the ACK was received
-                }
-                else
-                    _logger.Info($"Failed to get ACK from I2C Slave when sending {dwDataSend} First Byte: {InputBuffer[0]:X}");
+                    return true; // Return True if the ACK was received
+                _logger.Info(
+                    $"Failed to get ACK from I2C Slave when sending {dwDataSend} First Byte: {_inputBuffer[0]:X}");
                 return false; //Error, can't get the ACK bit 
             }
-            else
-            {
-                _logger.Info($"Error: {ftStatus} status");
-                return false;   // Failed to get any data back or got an error code back
-            }
 
+            _logger.Info($"Error: {ftStatus} status");
+            return false; // Failed to get any data back or got an error code back
         }
 
         //my function
         public bool SendByte(byte dwDataSend)
         {
-            dwNumBytesToSend = 0;           // Clear output buffer
-            FTDI.FT_STATUS ftStatus = FTDI.FT_STATUS.FT_OK;
+            _dwNumBytesToSend = 0; // Clear output buffer
+            var ftStatus = FTDI.FT_STATUS.FT_OK;
 
-            OutputBuffer[dwNumBytesToSend++] = 0x11;        // command to clock data bytes out MSB first on clock falling edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // 
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // Data length of 0x0000 means 1 byte data to clock out
-            OutputBuffer[dwNumBytesToSend++] = dwDataSend;  // Actual byte to clock out
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x11; // command to clock data bytes out MSB first on clock falling edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // 
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Data length of 0x0000 means 1 byte data to clock out
+            _outputBuffer[_dwNumBytesToSend++] = dwDataSend; // Actual byte to clock out
 
             // Put I2C line back to idle (during transfer) state... Clock line driven low, Data line high (open drain)
-            OutputBuffer[dwNumBytesToSend++] = 0x80;        // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
-            OutputBuffer[dwNumBytesToSend++] = 0x1A;        // Set the value of the pins (only affects those set as output)
-            OutputBuffer[dwNumBytesToSend++] = 0x3B;        // Set the directions - all pins as output except Bit2(data_in)
+            _outputBuffer[_dwNumBytesToSend++] = 0x80; // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
+            _outputBuffer[_dwNumBytesToSend++] = 0x1A; // Set the value of the pins (only affects those set as output)
+            _outputBuffer[_dwNumBytesToSend++] = 0x3B; // Set the directions - all pins as output except Bit2(data_in)
 
             // AD0 (SCL) is output driven low
             // AD1 (DATA OUT) is output high (open drain)
             // AD2 (DATA IN) is input (therefore the output value specified is ignored)
             // AD3 to AD7 are inputs driven high (not used in this application)
 
-            OutputBuffer[dwNumBytesToSend++] = 0x22;    // Command to clock in bits MSB first on clock rising edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;    // Length of 0x00 means to scan in 1 bit
+            _outputBuffer[_dwNumBytesToSend++] = 0x22; // Command to clock in bits MSB first on clock rising edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Length of 0x00 means to scan in 1 bit
 
             // This command then tells the MPSSE to send any results gathered back immediately
-            OutputBuffer[dwNumBytesToSend++] = 0x87;    //Send answer back immediate command
+            _outputBuffer[_dwNumBytesToSend++] = 0x87; //Send answer back immediate command
 
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
-            _logger.Info($"Status: {ftStatus};Sent: {dwDataSend:X}; Send {dwNumBytesToSend}; Sent: {dwNumBytesSent}");
+            ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend, ref _dwNumBytesSent); //Send off the commands
+            _logger.Info($"Status: {ftStatus};Sent: {dwDataSend:X}; Send {_dwNumBytesToSend}; Sent: {_dwNumBytesSent}");
 
             return true;
         }
 
         /// <summary>
-        /// Fully configured send. First byte should be address
-        /// Send Idea from https://raw.githubusercontent.com/gurvindrasingh/AnyI2C/master/AnyI2cLib/FT232HI2C.cs
+        ///     Fully configured send. First byte should be address
+        ///     Send Idea from https://raw.githubusercontent.com/gurvindrasingh/AnyI2C/master/AnyI2cLib/FT232HI2C.cs
         /// </summary>
         /// <param name="data"></param>
         /// <returns></returns>
         public bool SendBytes(params byte[] data)
         {
             var succeeded = false;
-            SetI2CLinesIdle();							// Set idle line condition
+            SetI2CLinesIdle(); // Set idle line condition
             try
             {
                 SetI2CStart(); // Send the start condition
                 if (data != null)
-                {
-                    for (int i = 0; i < data.Length; i++)
+                    for (var i = 0; i < data.Length; i++)
                     {
                         succeeded = i == 0
-                            ? SendAddressAndCheckACK((byte) data[0], false)
+                            ? SendAddressAndCheckACK(data[0], false)
                             : SendByteAndCheckACK(data[i]);
 
                         if (!succeeded)
                         {
-                            _logger.Info($"Send Failed");
+                            _logger.Info("Send Failed");
                             return false;
                         }
                     }
-                }
             }
             finally
             {
-                SetI2CStop();								// Send the stop condition	
+                SetI2CStop(); // Send the stop condition	
             }
-            
+
             return succeeded;
         }
-
-        public bool SendByteRaw1(byte[] bytes)
-        {
-            dwNumBytesToSend = 0;           // Clear output buffer
-            FTDI.FT_STATUS ftStatus = FTDI.FT_STATUS.FT_OK;
-
-            OutputBuffer[dwNumBytesToSend++] = 0x11;        // command to clock data bytes out MSB first on clock falling edge
-
-            var length = BitConverter.GetBytes((ushort)bytes.Length);
-            foreach (var b in length)
-            {
-                OutputBuffer[dwNumBytesToSend++] = b;
-            }
-
-            foreach (var b in bytes)
-            {
-                OutputBuffer[dwNumBytesToSend++] = b;  // Actual byte to clock out    
-            }
-
-            // Put I2C line back to idle (during transfer) state... Clock line driven low, Data line high (open drain)
-            OutputBuffer[dwNumBytesToSend++] = 0x80;        // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
-            OutputBuffer[dwNumBytesToSend++] = 0x1A;        // Set the value of the pins (only affects those set as output)
-            OutputBuffer[dwNumBytesToSend++] = 0x3B;        // Set the directions - all pins as output except Bit2(data_in)
-
-            // AD0 (SCL) is output driven low
-            // AD1 (DATA OUT) is output high (open drain)
-            // AD2 (DATA IN) is input (therefore the output value specified is ignored)
-            // AD3 to AD7 are inputs driven high (not used in this application)
-
-            OutputBuffer[dwNumBytesToSend++] = 0x22;    // Command to clock in bits MSB first on clock rising edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;    // Length of 0x00 means to scan in 1 bit
-
-            // This command then tells the MPSSE to send any results gathered back immediately
-            OutputBuffer[dwNumBytesToSend++] = 0x87;    //Send answer back immediate command
-
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
-
-            _logger.Info($"Status: {ftStatus};Sent: {bytes.Length}; Send {dwNumBytesToSend}; Total Sent: {dwNumBytesSent}");
-
-            dwNumInputBuffer = 0;
-            ReadTimeoutCounter = 0;
-
-            ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer);  // Get number of bytes in the input buffer
-
-            while ((dwNumInputBuffer < 1) && (ftStatus == FTDI.FT_STATUS.FT_OK) && (ReadTimeoutCounter < 5500))
-            {
-                // Sit in this loop until
-                // (1) we receive the one byte expected
-                // or (2) a hardware error occurs causing the GetQueueStatus to return an error code
-                // or (3) we have checked 500 times and the expected byte is not coming 
-                ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer);  // Get number of bytes in the input buffer
-                                                                                   //_logger.Info("counter: %d, bytes: %d, ftStatus: %d", ReadTimeoutCounter, dwNumInputBuffer, ftStatus);
-                ReadTimeoutCounter++;
-            }
-
-            // If the loop above exited due to the byte coming back (not an error code and not a timeout)
-
-            if ((ftStatus == FTDI.FT_STATUS.FT_OK) && (ReadTimeoutCounter < 2500))
-            {
-                ftStatus = _ftdiDevice.Read(InputBuffer, dwNumInputBuffer, ref dwNumBytesRead); // Now read the data
-                                                                                                //_logger.Info("status was %d, input was 0x%X", ftStatus, InputBuffer[0]);  
-                if (((InputBuffer[0] & 0x01) == 0x0))       //Check ACK bit 0 on data byte read out
-                {
-                    _logger.Info("received ACK.");
-                    return true;    // Return True if the ACK was received
-                }
-                else
-                    _logger.Info($"Failed to get ACK from I2C Slave when sending {bytes:X} First Index: {InputBuffer[0]:X}");
-                return false; //Error, can't get the ACK bit 
-            }
-            else
-            {
-                _logger.Info($"Error: {ftStatus} status");
-                return false;   // Failed to get any data back or got an error code back
-            }
-        }
-
 
 
         // ##############################################################################################################
@@ -388,63 +375,56 @@ namespace FtdiCore
 
         public bool SendAddressAndCheckACK(byte address, bool read)
         {
-            dwNumBytesToSend = 0;           // Clear output buffer
-            FTDI.FT_STATUS ftStatus = FTDI.FT_STATUS.FT_OK;
+            _dwNumBytesToSend = 0; // Clear output buffer
+            var ftStatus = FTDI.FT_STATUS.FT_OK;
 
             // Combine the Read/Write bit and the actual data to make a single byte with 7 data bits and the R/W in the LSB
             if (read)
-            {
-                address = (byte)((address << 1) | 0x01);
-            }
+                address = (byte) ((address << 1) | 0x01);
             else
-            {
-                address = (byte)((address << 1) & 0xFE);
-            }
+                address = (byte) ((address << 1) & 0xFE);
 
-            OutputBuffer[dwNumBytesToSend++] = 0x11;        // command to clock data bytes out MSB first on clock falling edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // 
-            OutputBuffer[dwNumBytesToSend++] = 0x00;        // Data length of 0x0000 means 1 byte data to clock out
-            OutputBuffer[dwNumBytesToSend++] = address;  // Actual byte to clock out
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x11; // command to clock data bytes out MSB first on clock falling edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // 
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Data length of 0x0000 means 1 byte data to clock out
+            _outputBuffer[_dwNumBytesToSend++] = address; // Actual byte to clock out
 
             // Put I2C line back to idle (during transfer) state... Clock line driven low, Data line high (open drain)
-            OutputBuffer[dwNumBytesToSend++] = 0x80;        // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
-            OutputBuffer[dwNumBytesToSend++] = 0x1A;        // 00011010
-            OutputBuffer[dwNumBytesToSend++] = 0x3B;        // 00111011
+            _outputBuffer[_dwNumBytesToSend++] = 0x80; // Command to set lower 8 bits of port (ADbus 0-7 on the FT232H)
+            _outputBuffer[_dwNumBytesToSend++] = 0x1A; // 00011010
+            _outputBuffer[_dwNumBytesToSend++] = 0x3B; // 00111011
 
             // AD0 (SCL) is output driven low
             // AD1 (DATA OUT) is output high (open drain)
             // AD2 (DATA IN) is input (therefore the output value specified is ignored)
             // AD3 to AD7 are inputs driven high (not used in this application)
 
-            OutputBuffer[dwNumBytesToSend++] = 0x22;    // Command to clock in bits MSB first on clock rising edge
-            OutputBuffer[dwNumBytesToSend++] = 0x00;    // Length of 0x00 means to scan in 1 bit
+            _outputBuffer[_dwNumBytesToSend++] = 0x22; // Command to clock in bits MSB first on clock rising edge
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // Length of 0x00 means to scan in 1 bit
 
             // This command then tells the MPSSE to send any results gathered back immediately
-            OutputBuffer[dwNumBytesToSend++] = 0x87;    //Send answer back immediate command
+            _outputBuffer[_dwNumBytesToSend++] = 0x87; //Send answer back immediate command
 
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
+            ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend, ref _dwNumBytesSent); //Send off the commands
 
             //Check if ACK bit received by reading the byte sent back from the FT232H containing the ACK bit
-            ftStatus = _ftdiDevice.Read(InputBuffer, 1, ref dwNumBytesRead);      //Read one byte from device receive buffer
+            ftStatus = _ftdiDevice.Read(_inputBuffer, 1,
+                ref _dwNumBytesRead); //Read one byte from device receive buffer
 
-            if ((ftStatus != FTDI.FT_STATUS.FT_OK) || (dwNumBytesRead == 0))
+            if (ftStatus != FTDI.FT_STATUS.FT_OK || _dwNumBytesRead == 0)
             {
                 _logger.Info("Failed to get ACK from I2C Slave - 0 bytes read");
                 return false; //Error, can't get the ACK bit
             }
-            else
-            {
-                var v = InputBuffer[0];
-                var ack = (v & 0x01);
-                if (ack != 0x00)     //Check ACK bit 0 on data byte read out
-                {
-                    //_logger.Info("Failed to get ACK from I2C Slave - Response was 0x%X", InputBuffer[0]);
-                    return false; //Error, can't get the ACK bit 
-                }
 
-            }
+            var v = _inputBuffer[0];
+            var ack = v & 0x01;
+            if (ack != 0x00) //Check ACK bit 0 on data byte read out
+                //_logger.Info("Failed to get ACK from I2C Slave - Response was 0x%X", InputBuffer[0]);
+                return false; //Error, can't get the ACK bit 
             //_logger.Info("Received ACK bit from Address 0x%X - 0x%X", dwDataSend, InputBuffer[0]);
-            return true;       // Return True if the ACK was received
+            return true; // Return True if the ACK was received
         }
 
         // ##############################################################################################################
@@ -457,12 +437,13 @@ namespace FtdiCore
 
         public void SetI2CLinesIdle()
         {
-            dwNumBytesToSend = 0;           //Clear output buffer
+            _dwNumBytesToSend = 0; //Clear output buffer
 
             // Set the idle states for the AD lines
-            OutputBuffer[dwNumBytesToSend++] = 0x80;    // Command to set directions of ADbus and data values for pins set as o/p
-            OutputBuffer[dwNumBytesToSend++] = 0x1B;        // 00011011
-            OutputBuffer[dwNumBytesToSend++] = _gpioDMask; //0xD4; //0x3B;    // 00111011
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x80; // Command to set directions of ADbus and data values for pins set as o/p
+            _outputBuffer[_dwNumBytesToSend++] = 0x1B; // 00011011
+            _outputBuffer[_dwNumBytesToSend++] = _gpioDMask; //0xD4; //0x3B;    // 00111011
 
             // IDLE line states are ...
             // AD0 (SCL) is output high (open drain, pulled up externally)
@@ -470,16 +451,18 @@ namespace FtdiCore
             // AD2 (DATA IN) is input (therefore the output value specified is ignored)
 
             // Set the idle states for the AC lines
-            OutputBuffer[dwNumBytesToSend++] = 0x82;    // Command to set directions of ACbus and data values for pins set as o/p
-            OutputBuffer[dwNumBytesToSend++] = 0xFF;    // 11111111
-            OutputBuffer[dwNumBytesToSend++] = 0x40;    // 01000000
-                                                        //_logger.Info("i2c lines set to idle");
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x82; // Command to set directions of ACbus and data values for pins set as o/p
+            _outputBuffer[_dwNumBytesToSend++] = 0xFF; // 11111111
+            _outputBuffer[_dwNumBytesToSend++] = 0x40; // 01000000
+            //_logger.Info("i2c lines set to idle");
 
             // IDLE line states are ...
             // AC6 (LED) is output driving high
             // AC0/1/2/3/4/5/7 are inputs (not used in this application)
 
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend,
+                ref _dwNumBytesSent); //Send off the commands
         }
 
 
@@ -491,34 +474,41 @@ namespace FtdiCore
         // ##############################################################################################################
         public void SetI2CStart()
         {
-            dwNumBytesToSend = 0;           //Clear output buffer
+            _dwNumBytesToSend = 0; //Clear output buffer
             uint dwCount;
 
             // Pull Data line low, leaving clock high (open-drain)
-            for (dwCount = 0; dwCount < 4; dwCount++)  // Repeat commands to ensure the minimum period of the start hold time is achieved
+            for (dwCount = 0;
+                dwCount < 4;
+                dwCount++) // Repeat commands to ensure the minimum period of the start hold time is achieved
             {
-                OutputBuffer[dwNumBytesToSend++] = 0x80;    // Command to set directions of ADbus and data values for pins set as o/p
-                OutputBuffer[dwNumBytesToSend++] = 0xFD;    // Bring data out low (bit 1)
-                OutputBuffer[dwNumBytesToSend++] = 0xFB;    // Set all pins as output except bit 2 which is the data_in
+                _outputBuffer[_dwNumBytesToSend++] =
+                    0x80; // Command to set directions of ADbus and data values for pins set as o/p
+                _outputBuffer[_dwNumBytesToSend++] = 0xFD; // Bring data out low (bit 1)
+                _outputBuffer[_dwNumBytesToSend++] = 0xFB; // Set all pins as output except bit 2 which is the data_in
             }
 
             // Pull Clock line low now, making both clock and data low
-            for (dwCount = 0; dwCount < 4; dwCount++)  // Repeat commands to ensure the minimum period of the start setup time is achieved
+            for (dwCount = 0;
+                dwCount < 4;
+                dwCount++) // Repeat commands to ensure the minimum period of the start setup time is achieved
             {
-                OutputBuffer[dwNumBytesToSend++] = 0x80;    // Command to set directions of ADbus and data values for pins set as o/p
-                OutputBuffer[dwNumBytesToSend++] = 0xFC;    // Bring clock line low too to make clock and data low
-                OutputBuffer[dwNumBytesToSend++] = 0xFB;    // Set all pins as output except bit 2 which is the data_in
+                _outputBuffer[_dwNumBytesToSend++] =
+                    0x80; // Command to set directions of ADbus and data values for pins set as o/p
+                _outputBuffer[_dwNumBytesToSend++] = 0xFC; // Bring clock line low too to make clock and data low
+                _outputBuffer[_dwNumBytesToSend++] = 0xFB; // Set all pins as output except bit 2 which is the data_in
             }
 
             // Turn the LED on by setting port AC6 low.
-            OutputBuffer[dwNumBytesToSend++] = 0x82;    // Command to set directions of upper 8 pins and force value on bits set as output
-            OutputBuffer[dwNumBytesToSend++] = 0xBF;    // 10111111
-            OutputBuffer[dwNumBytesToSend++] = 0x40;    // 01000000
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x82; // Command to set directions of upper 8 pins and force value on bits set as output
+            _outputBuffer[_dwNumBytesToSend++] = 0xBF; // 10111111
+            _outputBuffer[_dwNumBytesToSend++] = 0x40; // 01000000
 
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
-                                                                                                //_logger.Info("i2c lines set to start");
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend,
+                ref _dwNumBytesSent); //Send off the commands
+            //_logger.Info("i2c lines set to start");
         }
-
 
 
         // ##############################################################################################################
@@ -530,40 +520,53 @@ namespace FtdiCore
 
         public void SetI2CStop()
         {
-            dwNumBytesToSend = 0;           //Clear output buffer
+            _dwNumBytesToSend = 0; //Clear output buffer
             uint dwCount;
 
             // Initial condition for the I2C Stop - Pull data low (Clock will already be low and is kept low)
-            for (dwCount = 0; dwCount < 4; dwCount++)        // Repeat commands to ensure the minimum period of the stop setup time is achieved
+            for (dwCount = 0;
+                dwCount < 4;
+                dwCount++) // Repeat commands to ensure the minimum period of the stop setup time is achieved
             {
-                OutputBuffer[dwNumBytesToSend++] = 0x80;    // Command to set directions of ADbus and data values for pins set as o/p
-                OutputBuffer[dwNumBytesToSend++] = 0xFC;    // put data and clock low
-                OutputBuffer[dwNumBytesToSend++] = 0xFB;    // Set all pins as output except bit 2 which is the data_in
+                _outputBuffer[_dwNumBytesToSend++] =
+                    0x80; // Command to set directions of ADbus and data values for pins set as o/p
+                _outputBuffer[_dwNumBytesToSend++] = 0xFC; // put data and clock low
+                _outputBuffer[_dwNumBytesToSend++] = 0xFB; // Set all pins as output except bit 2 which is the data_in
             }
 
             // Clock now goes high (open drain)
-            for (dwCount = 0; dwCount < 4; dwCount++)        // Repeat commands to ensure the minimum period of the stop setup time is achieved
+            for (dwCount = 0;
+                dwCount < 4;
+                dwCount++) // Repeat commands to ensure the minimum period of the stop setup time is achieved
             {
-                OutputBuffer[dwNumBytesToSend++] = 0x80;    // Command to set directions of ADbus and data values for pins set as o/p
-                OutputBuffer[dwNumBytesToSend++] = 0xFD;    // put data low, clock remains high (open drain, pulled up externally)
-                OutputBuffer[dwNumBytesToSend++] = 0xFB;    // Set all pins as output except bit 2 which is the data_in
+                _outputBuffer[_dwNumBytesToSend++] =
+                    0x80; // Command to set directions of ADbus and data values for pins set as o/p
+                _outputBuffer[_dwNumBytesToSend++] =
+                    0xFD; // put data low, clock remains high (open drain, pulled up externally)
+                _outputBuffer[_dwNumBytesToSend++] = 0xFB; // Set all pins as output except bit 2 which is the data_in
             }
 
             // Data now goes high too (both clock and data now high / open drain)
-            for (dwCount = 0; dwCount < 4; dwCount++)    // Repeat commands to ensure the minimum period of the stop hold time is achieved
+            for (dwCount = 0;
+                dwCount < 4;
+                dwCount++) // Repeat commands to ensure the minimum period of the stop hold time is achieved
             {
-                OutputBuffer[dwNumBytesToSend++] = 0x80;    // Command to set directions of ADbus and data values for pins set as o/p
-                OutputBuffer[dwNumBytesToSend++] = 0xFF;    // both clock and data now high (open drain, pulled up externally)
-                OutputBuffer[dwNumBytesToSend++] = 0xFB;    // Set all pins as output except bit 2 which is the data_in
+                _outputBuffer[_dwNumBytesToSend++] =
+                    0x80; // Command to set directions of ADbus and data values for pins set as o/p
+                _outputBuffer[_dwNumBytesToSend++] =
+                    0xFF; // both clock and data now high (open drain, pulled up externally)
+                _outputBuffer[_dwNumBytesToSend++] = 0xFB; // Set all pins as output except bit 2 which is the data_in
             }
 
             // Turn the LED off by setting port AC6 high.
-            OutputBuffer[dwNumBytesToSend++] = 0x82;    // Command to set directions of upper 8 pins and force value on bits set as output
-            OutputBuffer[dwNumBytesToSend++] = 0xFF;    // 11111111
-            OutputBuffer[dwNumBytesToSend++] = 0x40;    // 01000000
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x82; // Command to set directions of upper 8 pins and force value on bits set as output
+            _outputBuffer[_dwNumBytesToSend++] = 0xFF; // 11111111
+            _outputBuffer[_dwNumBytesToSend++] = 0x40; // 01000000
 
-            ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);     //Send off the commands
-                                                                                                //_logger.Info("i2c stop");
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend,
+                ref _dwNumBytesSent); //Send off the commands
+            //_logger.Info("i2c stop");
         }
 
         // OPENING DEVICE AND MPSSE CONFIGURATION
@@ -572,242 +575,245 @@ namespace FtdiCore
         {
             // Open the FT232H module by it's description in the EEPROM
             // Note: See FT_OpenEX in the D2xx Programmers Guide for other options available
-            ftStatus = _ftdiDevice.OpenByIndex(DeviceIndex);
+            _ftStatus = _ftdiDevice.OpenByIndex(DeviceIndex);
 
             // Check if Open was successful
-            if (ftStatus != FTDI.FT_STATUS.FT_OK)
+            if (_ftStatus != FTDI.FT_STATUS.FT_OK)
             {
                 _logger.Info($"Can't open {DeviceIndex} device!");
                 return false;
             }
+            // #########################################################################################
+            // After opening the device, Put it into MPSSE mode
+            // #########################################################################################
+
+            // Print message to show port opened successfully
+            _logger.Info("Successfully opened FT232H device.");
+
+            // Reset the FT232H
+            _ftStatus |= _ftdiDevice.ResetDevice();
+
+            _logger.Info($"Reset: {_ftStatus}");
+
+            // Purge USB receive buffer ... Get the number of bytes in the FT232H receive buffer and then read them
+            _ftStatus |= _ftdiDevice.GetRxBytesAvailable(ref _dwNumInputBuffer);
+            if (_ftStatus == FTDI.FT_STATUS.FT_OK && _dwNumInputBuffer > 0)
+                _ftdiDevice.Read(_inputBuffer, _dwNumInputBuffer, ref _dwNumBytesRead);
+            _logger.Info("Purged receive buffer.");
+
+            var pinSetupBuffer = new byte[]
+            {
+                0x80,
+                0,
+                0xBB
+            };
+
+            //ftStatus |= _ftdiDevice.SetBaudRate(9600);
+            _ftStatus |= _ftdiDevice.InTransferSize(65536); // Set USB request transfer sizes
+            _logger.Info($"InTransferSize: {_ftStatus}");
+            _ftStatus |= _ftdiDevice.SetCharacters(0, false, 0, false); // Disable event and error characters
+            _logger.Info($"SetCharacters: {_ftStatus}");
+            _ftStatus |= _ftdiDevice.SetTimeouts(5000, 5000); // Set the read and write timeouts to 5 seconds
+            _logger.Info($"SetTimeouts: {_ftStatus}");
+            _ftStatus |= _ftdiDevice.SetLatency(16); // Keep the latency timer at default of 16ms
+            _logger.Info($"SetLatency: {_ftStatus}");
+            _ftStatus |=
+                _ftdiDevice.SetBitMode(0x0,
+                    FTDI.FT_BIT_MODES.FT_BIT_MODE_RESET); // Reset the mode to whatever is set in EEPROM
+            _logger.Info($"SetBitmode: {_ftStatus}");
+            _ftStatus |= _ftdiDevice.SetBitMode(0x0, FTDI.FT_BIT_MODES.FT_BIT_MODE_MPSSE); // Enable MPSSE mode
+            _logger.Info($"SetBitmode: {_ftStatus}");
+            _ftStatus |= _ftdiDevice.Write(pinSetupBuffer, pinSetupBuffer.Length, ref _dwNumBytesSent);
+            _logger.Info($"Write: {_ftStatus}");
+
+            // Inform the user if any errors were encountered
+            if (_ftStatus != FTDI.FT_STATUS.FT_OK)
+            {
+                _logger.Info("failure to initialize device! ");
+                return false;
+                //return 1;
+            }
+
+            _logger.Info("MPSSE initialized.");
+
+            // #########################################################################################
+            // Synchronise the MPSSE by sending bad command AA to it
+            // #########################################################################################
+
+            _dwNumBytesToSend = 0;
+
+            _outputBuffer[_dwNumBytesToSend++] = 0x84;
+            // Enable internal loopback
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend, ref _dwNumBytesSent);
+            if (_ftStatus != FTDI.FT_STATUS.FT_OK) _logger.Info("failed");
+
+            _dwNumBytesToSend = 0;
+
+            _ftStatus = _ftdiDevice.GetRxBytesAvailable(ref _dwNumBytesRead);
+            //_logger.Info("");
+
+            if (_dwNumBytesRead != 0)
+            {
+                _logger.Info("Error - MPSSE receive buffer should be empty");
+                _ftdiDevice.SetBitMode(0x0, 0x00);
+                _ftdiDevice.Close();
+                return false;
+            }
+
+            _dwNumBytesToSend = 0;
+            _outputBuffer[_dwNumBytesToSend++] = 0xAA;
+            // Bogus command added to queue
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend, ref _dwNumBytesSent);
+            //_logger.Info("sent.");
+            _dwNumBytesToSend = 0;
+
+            do
+            {
+                _ftStatus = _ftdiDevice.GetRxBytesAvailable(ref _dwNumBytesRead);
+                // Get the number of bytes in the device input buffer
+            } while (_dwNumBytesRead == 0 && _ftStatus == FTDI.FT_STATUS.FT_OK);
+
+            // Or timeout
+            _bCommandEchod = 0;
+            _ftStatus = _ftdiDevice.Read(_inputBuffer, _dwNumBytesRead, ref _dwNumBytesRead);
+            // Read out the input buffer
+
+            // Check if bad command and echo command are received
+            uint count;
+            for (count = 0; count < _dwNumBytesRead - 1; count++)
+                if (_inputBuffer[count] == 0xFA && _inputBuffer[count + 1] == 0xAA)
+                {
+                    //_logger.Info("Success. Input buffer contained 0x%X and 0x%X", InputBuffer[dwCount], InputBuffer[dwCount+1]);
+                    _bCommandEchod = 1;
+                    break;
+                }
+
+            if (_bCommandEchod == 0)
+            {
+                _logger.Info("failed to synchronize MPSSE with command 0xAA ");
+                _logger.Info($"{_inputBuffer[count]}, {_inputBuffer[count + 1]}");
+                _ftdiDevice.Close();
+                return false;
+            }
+
+            // #########################################################################################
+            // Synchronise the MPSSE by sending bad command AB to it
+            // #########################################################################################
+
+            _dwNumBytesToSend = 0;
+            //_logger.Info("");
+            //_logger.Info("Sending bogus command 0xAB...");
+            _outputBuffer[_dwNumBytesToSend++] = 0xAB;
+            // Bogus command added to queue
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend, ref _dwNumBytesSent);
+            _dwNumBytesToSend = 0;
+
+            do
+            {
+                _ftStatus = _ftdiDevice.GetRxBytesAvailable(ref _dwNumBytesRead);
+                // Get the number of bytes in the device input buffer
+            } while (_dwNumBytesRead == 0 && _ftStatus == FTDI.FT_STATUS.FT_OK);
+            // Or timeout
+
+
+            _bCommandEchod = 0;
+            _ftStatus = _ftdiDevice.Read(_inputBuffer, _dwNumBytesRead, ref _dwNumBytesRead);
+            // Read out the input buffer
+
+            for (count = 0; count < _dwNumBytesRead - 1; count++)
+                // Check if bad command and echo command are received
+                if (_inputBuffer[count] == 0xFA && _inputBuffer[count + 1] == 0xAB)
+                {
+                    _bCommandEchod = 1;
+                    //_logger.Info("Success. Input buffer contained 0x%X and 0x%X", InputBuffer[dwCount], InputBuffer[dwCount+1]);
+                    break;
+                }
+
+            if (_bCommandEchod == 0)
+            {
+                _logger.Info("failed to synchronize MPSSE with command 0xAB ");
+                _logger.Info($"{_inputBuffer[count]}, {_inputBuffer[count + 1]}");
+                _ftdiDevice.Close();
+                return false;
+            }
+
+            _dwNumBytesToSend = 0;
+            //_logger.Info("Disabling internal loopback...");
+            _outputBuffer[_dwNumBytesToSend++] = 0x85;
+            // Disable loopback
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend, ref _dwNumBytesSent);
+            if (_ftStatus != FTDI.FT_STATUS.FT_OK) _logger.Info("command failed");
+
+            // #########################################################################################
+            // Configure the MPSSE settings
+            // #########################################################################################
+
+            _dwNumBytesToSend = 0; // Clear index to zero
+            _outputBuffer[_dwNumBytesToSend++] = 0x8A; // Disable clock divide-by-5 for 60Mhz master clock
+            _outputBuffer[_dwNumBytesToSend++] = 0x97; // Ensure adaptive clocking is off
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x8C; // Enable 3 phase data clocking, data valid on both clock edges for I2C
+
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x9E; // Enable the FT232H's drive-zero mode on the lines used for I2C ...
+            _outputBuffer[_dwNumBytesToSend++] =
+                0x07; // ... on the bits 0, 1 and 2 of the lower port (AD0, AD1, AD2)...
+            _outputBuffer[_dwNumBytesToSend++] = 0x00; // ...not required on the upper port AC 0-7
+
+            _outputBuffer[_dwNumBytesToSend++] = 0x85; // Ensure internal loopback is off
+
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend,
+                ref _dwNumBytesSent); // Send off the commands
+
+            // Now configure the dividers to set the SCLK frequency which we will use
+            // The SCLK clock frequency can be worked out by the algorithm (when divide-by-5 is off)
+            // SCLK frequency  = 60MHz /((1 +  [(1 +0xValueH*256) OR 0xValueL])*2)
+            _dwNumBytesToSend = 0; // Clear index to zero
+            _outputBuffer[_dwNumBytesToSend++] = 0x86; // Command to set clock divisor
+            _outputBuffer[_dwNumBytesToSend++] = (byte) (dwClockDivisor & 0xFF); // Set 0xValueL of clock divisor
+            _outputBuffer[_dwNumBytesToSend++] = (byte) ((dwClockDivisor >> 8) & 0xFF); // Set 0xValueH of clock divisor
+            _ftStatus = _ftdiDevice.Write(_outputBuffer, _dwNumBytesToSend,
+                ref _dwNumBytesSent); // Send off the commands
+            if (_ftStatus == FTDI.FT_STATUS.FT_OK)
+            {
+                //_logger.Info("Clock set to three-phase, drive-zero mode set, loopback off.");
+            }
             else
             {
-                // #########################################################################################
-                // After opening the device, Put it into MPSSE mode
-                // #########################################################################################
-
-                // Print message to show port opened successfully
-                _logger.Info("Successfully opened FT232H device.");
-
-                // Reset the FT232H
-                ftStatus |= _ftdiDevice.ResetDevice();
-
-                // Purge USB receive buffer ... Get the number of bytes in the FT232H receive buffer and then read them
-                ftStatus |= _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer);
-                if ((ftStatus == FTDI.FT_STATUS.FT_OK) && (dwNumInputBuffer > 0))
-                {
-                    _ftdiDevice .Read(InputBuffer, dwNumInputBuffer, ref dwNumBytesRead);
-                }
-                _logger.Info("Purged receive buffer.");
-
-                var pinSetupBuffer = new byte[]
-                {
-                    0x80,
-                    0,
-                    0xBB
-                };
-
-                //ftStatus |= _ftdiDevice.SetBaudRate(9600);
-                ftStatus |= _ftdiDevice.InTransferSize(65536);        // Set USB request transfer sizes
-                ftStatus |= _ftdiDevice.SetCharacters(0, false, 0, false);          // Disable event and error characters
-                ftStatus |= _ftdiDevice.SetTimeouts(5000, 5000);           // Set the read and write timeouts to 5 seconds
-                ftStatus |= _ftdiDevice.SetLatency(16);               // Keep the latency timer at default of 16ms
-                ftStatus |= _ftdiDevice.SetBitMode(0x0, FTDI.FT_BIT_MODES.FT_BIT_MODE_RESET);             // Reset the mode to whatever is set in EEPROM
-                ftStatus |= _ftdiDevice.SetBitMode(0x0, FTDI.FT_BIT_MODES.FT_BIT_MODE_MPSSE);             // Enable MPSSE mode
-                ftStatus |= _ftdiDevice.Write(pinSetupBuffer, pinSetupBuffer.Length, ref dwNumBytesSent);
-
-                // Inform the user if any errors were encountered
-                if (ftStatus != FTDI.FT_STATUS.FT_OK)
-                {
-                    _logger.Info("failure to initialize device! ");
-                    return false;
-                    //return 1;
-                }
-
-                _logger.Info("MPSSE initialized.");
-
-                // #########################################################################################
-                // Synchronise the MPSSE by sending bad command AA to it
-                // #########################################################################################
-
-                dwNumBytesToSend = 0;
-
-                OutputBuffer[dwNumBytesToSend++] = 0x84;
-                // Enable internal loopback
-                ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);
-                if (ftStatus != FTDI.FT_STATUS.FT_OK) { _logger.Info("failed"); }
-
-                dwNumBytesToSend = 0;
-
-                ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumBytesRead);
-                //_logger.Info("");
-
-                if (dwNumBytesRead != 0)
-                {
-                    _logger.Info("Error - MPSSE receive buffer should be empty");
-                    _ftdiDevice.SetBitMode(0x0, 0x00);
-                    _ftdiDevice.Close();
-                    return false;
-                }
-
-                dwNumBytesToSend = 0;
-                OutputBuffer[dwNumBytesToSend++] = 0xAA;
-                // Bogus command added to queue
-                ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);
-                //_logger.Info("sent.");
-                dwNumBytesToSend = 0;
-
-                do
-                {
-                    ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumBytesRead);
-                    // Get the number of bytes in the device input buffer
-                } while ((dwNumBytesRead == 0) && (ftStatus == FTDI.FT_STATUS.FT_OK));
-
-                // Or timeout
-                bCommandEchod = 0;
-                ftStatus = _ftdiDevice.Read(InputBuffer, dwNumBytesRead, ref dwNumBytesRead);
-                // Read out the input buffer
-
-                // Check if bad command and echo command are received
-                uint count;
-                for (count = 0; count < dwNumBytesRead - 1; count++)
-                {
-                    if ((InputBuffer[count] == 0xFA) && (InputBuffer[count + 1] == 0xAA))
-                    {
-                        //_logger.Info("Success. Input buffer contained 0x%X and 0x%X", InputBuffer[dwCount], InputBuffer[dwCount+1]);
-                        bCommandEchod = 1;
-                        break;
-                    }
-                }
-
-                if (bCommandEchod == 0)
-                {
-                    _logger.Info("failed to synchronize MPSSE with command 0xAA ");
-                    _logger.Info($"{InputBuffer[count]}, {InputBuffer[count + 1]}");
-                    _ftdiDevice.Close();
-                    return false;
-                }
-
-                // #########################################################################################
-                // Synchronise the MPSSE by sending bad command AB to it
-                // #########################################################################################
-
-                dwNumBytesToSend = 0;
-                //_logger.Info("");
-                //_logger.Info("Sending bogus command 0xAB...");
-                OutputBuffer[dwNumBytesToSend++] = 0xAB;
-                // Bogus command added to queue
-                ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);
-                dwNumBytesToSend = 0;
-
-                do
-                {
-                    ftStatus = _ftdiDevice.GetRxBytesAvailable(ref dwNumBytesRead);
-                    // Get the number of bytes in the device input buffer
-                } while ((dwNumBytesRead == 0) && (ftStatus == FTDI.FT_STATUS.FT_OK));
-                // Or timeout
-
-
-                bCommandEchod = 0;
-                ftStatus = _ftdiDevice.Read(InputBuffer, dwNumBytesRead, ref dwNumBytesRead);
-                // Read out the input buffer
-
-                for (count = 0; count < dwNumBytesRead - 1; count++)
-                // Check if bad command and echo command are received
-                {
-                    if ((InputBuffer[count] == 0xFA) && (InputBuffer[count + 1] == 0xAB))
-                    {
-                        bCommandEchod = 1;
-                        //_logger.Info("Success. Input buffer contained 0x%X and 0x%X", InputBuffer[dwCount], InputBuffer[dwCount+1]);
-                        break;
-                    }
-                }
-                if (bCommandEchod == 0)
-                {
-                    _logger.Info("failed to synchronize MPSSE with command 0xAB ");
-                    _logger.Info($"{InputBuffer[count]}, {InputBuffer[count + 1]}");
-                    _ftdiDevice.Close();
-                    return false;
-                }
-
-                dwNumBytesToSend = 0;
-                //_logger.Info("Disabling internal loopback...");
-                OutputBuffer[dwNumBytesToSend++] = 0x85;
-                // Disable loopback
-                ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent);
-                if (ftStatus != FTDI.FT_STATUS.FT_OK)
-                {
-                    _logger.Info("command failed");
-                }
-                else
-                {
-                    //_logger.Info("disabled.");
-                }
-
-                // #########################################################################################
-                // Configure the MPSSE settings
-                // #########################################################################################
-
-                dwNumBytesToSend = 0;                   // Clear index to zero
-                OutputBuffer[dwNumBytesToSend++] = 0x8A;        // Disable clock divide-by-5 for 60Mhz master clock
-                OutputBuffer[dwNumBytesToSend++] = 0x97;        // Ensure adaptive clocking is off
-                OutputBuffer[dwNumBytesToSend++] = 0x8C;        // Enable 3 phase data clocking, data valid on both clock edges for I2C
-
-                OutputBuffer[dwNumBytesToSend++] = 0x9E;        // Enable the FT232H's drive-zero mode on the lines used for I2C ...
-                OutputBuffer[dwNumBytesToSend++] = 0x07;        // ... on the bits 0, 1 and 2 of the lower port (AD0, AD1, AD2)...
-                OutputBuffer[dwNumBytesToSend++] = 0x00;        // ...not required on the upper port AC 0-7
-
-                OutputBuffer[dwNumBytesToSend++] = 0x85;        // Ensure internal loopback is off
-
-                ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent); // Send off the commands
-
-                // Now configure the dividers to set the SCLK frequency which we will use
-                // The SCLK clock frequency can be worked out by the algorithm (when divide-by-5 is off)
-                // SCLK frequency  = 60MHz /((1 +  [(1 +0xValueH*256) OR 0xValueL])*2)
-                dwNumBytesToSend = 0;                               // Clear index to zero
-                OutputBuffer[dwNumBytesToSend++] = 0x86;                    // Command to set clock divisor
-                OutputBuffer[dwNumBytesToSend++] = (byte)(dwClockDivisor & 0xFF);           // Set 0xValueL of clock divisor
-                OutputBuffer[dwNumBytesToSend++] = (byte)((dwClockDivisor >> 8) & 0xFF);        // Set 0xValueH of clock divisor
-                ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent); // Send off the commands
-                if (ftStatus == FTDI.FT_STATUS.FT_OK)
-                {
-                    //_logger.Info("Clock set to three-phase, drive-zero mode set, loopback off.");
-                }
-                else
-                {
-                    _logger.Info("Clock and pin mode set failed.");
-                }
-
-
-                // #########################################################################################
-                // Configure the I/O pins of the MPSSE
-                // #########################################################################################
-
-                // Call the I2C function to set the lines of port AD to their required states
-                SetI2CLinesIdle();
-
-                // Also set the required states of port AC0-7. Bit 6 is used as an active-low LED, the others are unused
-                // After this instruction, bit 6 will drive out high (LED off)
-                //dwNumBytesToSend = 0;             // Clear index to zero
-                //OutputBuffer[dwNumBytesToSend++] = 0x82;  // Command to set directions of upper 8 pins and force value on bits set as output
-                //OutputBuffer[dwNumBytesToSend++] = 0xFF;      // Write 1's to all bits, only affects those set as output
-                //OutputBuffer[dwNumBytesToSend++] = 0x40;  // Set bit 6 as an output
-                //ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent); // Send off the commands
+                _logger.Info("Clock and pin mode set failed.");
             }
+
+
+            // #########################################################################################
+            // Configure the I/O pins of the MPSSE
+            // #########################################################################################
+
+            // Call the I2C function to set the lines of port AD to their required states
+            SetI2CLinesIdle();
+
+            // Also set the required states of port AC0-7. Bit 6 is used as an active-low LED, the others are unused
+            // After this instruction, bit 6 will drive out high (LED off)
+            //dwNumBytesToSend = 0;             // Clear index to zero
+            //OutputBuffer[dwNumBytesToSend++] = 0x82;  // Command to set directions of upper 8 pins and force value on bits set as output
+            //OutputBuffer[dwNumBytesToSend++] = 0xFF;      // Write 1's to all bits, only affects those set as output
+            //OutputBuffer[dwNumBytesToSend++] = 0x40;  // Set bit 6 as an output
+            //ftStatus = _ftdiDevice.Write(OutputBuffer, dwNumBytesToSend, ref dwNumBytesSent); // Send off the commands
 
             return true;
         }
 
-        public void ShutdownFtdi()
+        public bool ShutdownFtdi()
         {
-            _logger.Info("Shutting Down");
-            _ftdiDevice.SetBitMode(0x0, 0x00);
-            _ftdiDevice.Close();
+            _logger.Info("Shutting Down: Starting");
+            var result = _ftdiDevice.SetBitMode(0x0, 0x00);
+            _logger.Info($"Shutting Down: Set BitMode: {result}");
+            result = _ftdiDevice.Close();
+            _logger.Info($"Shutting Down: Close: {result}");
+            return result == FTDI.FT_STATUS.FT_OK || result == FTDI.FT_STATUS.FT_INVALID_HANDLE;
         }
 
         public void ScanDevicesAndQuit()
         {
-
             _logger.Info("Scanning I2C bus:");
             bool success;
             byte address;
@@ -824,10 +830,7 @@ namespace FtdiCore
                 {
                     //_logger.Info("I2C device found at address 0x");
                     _logger.Info("0x");
-                    if (address < 16)
-                    {
-                        _logger.Info("0");
-                    }
+                    if (address < 16) _logger.Info("0");
                     _logger.Info($"{address}");
                     //_logger.Info(".");
                     numDevices++;
@@ -852,10 +855,7 @@ namespace FtdiCore
                 }
                 else
                 {
-                    if (numDevices > 1)
-                    {
-                        _logger.Info($"{numDevices} devices found.");
-                    }
+                    if (numDevices > 1) _logger.Info($"{numDevices} devices found.");
                 }
             }
 
@@ -876,6 +876,162 @@ namespace FtdiCore
             }
 
             return false;
+        }
+
+        public void Dispose()
+        {
+            _autoReconnectTimer.Dispose();
+        }
+
+        private void InitReconnectImpl()
+        {
+            if (_initCheckExecuting) return;
+
+            try
+            {
+                _initCheckExecuting = true;
+
+                if (!GetDeviceByIndex(DeviceIndex, out var device))
+                {
+                    // Failed talking to the driver. This indicates something in software is wrong
+                    _logger.Info($"FTDI Core - DeviceIndex {DeviceIndex} unavailable.");
+                    return;
+                }
+
+                // If previous state was not connected and the device count is high enough to meet
+                // the index (note, this is not great, we should use another method instead of an index
+                // to determine which device we are controlling. this will need to be adjusted
+                // TODO: Instead of Device Index, use another method of identification
+                if (!Ready && device != null)
+                {
+                    _logger.Info($"Detected Device: {device.Description}; Location: {device.LocationId}; Id: {device.Id}; Serial Number: {device.SerialNumber}");
+
+                    if (device.LocationId == 0)
+                    {
+                        var cycle = _ftdiDevice.CyclePort();
+                        _logger.Info($"FTDI CyclePort: {cycle}");
+                        Thread.Sleep(100);
+                        CreateDevice();
+                        return;
+                    }
+
+                    if (_initialized)
+                    {
+                        //_logger.Info("FTDI Core - Re-initializing");
+                        //var reset = _ftdiDevice.ResetDevice();
+                        //if (reset == FTDI.FT_STATUS.FT_OK)
+                        //{
+                        //    _initialized = false;
+                        //    Thread.Sleep(100);
+                        //    return;
+                        //}
+                        //var reload = _ftdiDevice.Reload(0x0403, 0x6014);
+                        //_logger.Info($"Reload: {reload}");
+                        // Device was previously initialized, so we should cycle / reset
+                        //var close = _ftdiDevice.Close();
+                        //_logger.Info($"FTDI Close: {close}");
+                        // Re-Create the device
+                        //CreateDevice();
+                    }
+                    else
+                    {
+                        _logger.Info("FTDI Core - Device initializing");
+                    }
+
+                    // Execute Init Commands
+                    var collection = InitCommands.GetOrAdd(DeviceIndex, x => new List<Func<bool>>());
+
+                    // Execute the init functions
+                    for (var index = 0; index < collection.Count; index++)
+                    {
+                        var action = collection[index];
+                        _logger.Info($"FTDI Core - Init Action {index}");
+                        var result = action();
+                        if (result == false)
+                        {
+                            _logger.Info($"FTDI Core - Init Action {index} returned false!");
+                            return;
+                        }
+                    }
+
+                    Ready = true;
+                    _initialized = true;
+                }
+                else if (Ready && device == null)
+                {
+                    _logger.Info("FTDI Core Disconnected? No device found.");
+
+                    //SetI2CLinesIdle();
+                    //ShutdownFtdi();
+                    //var cycle = _ftdiDevice.CyclePort();
+                    //_logger.Info($"FTDI CyclePort: {cycle}");
+                    //var close = _ftdiDevice.Close();
+                    //_logger.Info($"FTDI Close: {close}");
+                    // Cant detect the device, so mark it as not connected. When it
+                    // connects again, the Init sequence should be run
+                    Ready = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in _autoReconnectTimer_Elapsed. {ex.Message}");
+            }
+            finally
+            {
+                _initCheckExecuting = false;
+            }
+        }
+
+
+        private void _autoReconnectTimer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            InitReconnectImpl();
+        }
+
+        public bool GetDeviceByLocationId(uint locationId, out FtdiDevice device)
+        {
+            // Init object
+            device = null;
+
+            if (_ftdiDevice.GetDeviceList(_nodeBuffer) == FTDI.FT_STATUS.FT_OK)
+            {
+                foreach (var deviceInfoNode in _nodeBuffer)
+                {
+                    if (deviceInfoNode == null) continue;
+                    if (deviceInfoNode.LocId == locationId) device = new FtdiDevice(deviceInfoNode);
+                }
+
+                // FTDI responded
+                return true;
+            }
+
+            //FTDI did not respond
+            return false;
+        }
+
+
+        public bool GetDeviceByIndex(uint deviceIndex, out FtdiDevice device)
+        {
+            // Init object
+            device = null;
+
+            if (_ftdiDevice.GetDeviceList(_nodeBuffer) == FTDI.FT_STATUS.FT_OK)
+            {
+                var i = _nodeBuffer[deviceIndex];
+                if (i != null) device = new FtdiDevice(i);
+
+                // FTDI responded
+                return true;
+            }
+
+            //FTDI did not respond
+            return false;
+        }
+
+        protected virtual void OnFtdiInitializeStateChanged(bool e)
+        {
+            _logger.Info($"FTDI Core - Changing Ready State to {e}");
+            FtdiInitializeStateChanged?.Invoke(this, e);
         }
     }
 }

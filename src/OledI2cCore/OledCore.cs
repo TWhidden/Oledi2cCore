@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 namespace OledI2cCore
@@ -54,6 +55,8 @@ namespace OledI2cCore
         ///     Default font to be used with simple string writes
         /// </summary>
         private static readonly Oled_Font_5x7 DefaultFont = new Oled_Font_5x7();
+
+        private readonly List<Func<bool>> _initActions = new List<Func<bool>>();
 
         /// <summary>
         ///     Command lookup for Debugging
@@ -176,6 +179,54 @@ namespace OledI2cCore
             {
                 _logger?.Info($"No available screen config for screen size {screenSize}");
             }
+
+            if (_wire.ReadyState)
+            {
+                InitCommandStart();
+            }
+
+            _wire.ReadyStateChanged += _wire_ReadyStateChanged;
+
+        }
+
+        private void _wire_ReadyStateChanged(object sender, bool e)
+        {
+            if (e)
+            {
+                InitCommandStart();
+            }
+        }
+
+        /// <summary>
+        /// Executions to run when the I2C is ready
+        /// </summary>
+        /// <param name="action"></param>
+        public void InitCommandRegister(Func<bool> action)
+        {
+            _initActions.Add(action);
+        }
+
+        /// <summary>
+        /// Clear the Init commands expected to run when the I2C is read
+        /// </summary>
+        public void InitCommandReset()
+        {
+            _initActions.Clear();
+        }
+
+        /// <summary>
+        /// Init the Commands
+        /// </summary>
+        public void InitCommandStart()
+        {
+            foreach (var initAction in _initActions)
+            {
+                if (!initAction())
+                {
+                    Debug.WriteLine("Oled Failed Init Action");
+                    return;
+                }
+            }
         }
 
         public byte Height { get; }
@@ -218,7 +269,7 @@ namespace OledI2cCore
 
             ClearDisplay(true);
 
-            _logger?.Info("Display on");
+            _logger?.Info($"Display on: {result}");
 
             return result;
         }
@@ -230,6 +281,8 @@ namespace OledI2cCore
         /// <returns></returns>
         private bool TransferData(byte[] data)
         {
+            if (!_wire.ReadyState) return false;
+
             //TODO: optimize to reduce allocations
             var buffer = new byte[data.Length + 2];
             buffer[0] = _address;
@@ -247,6 +300,8 @@ namespace OledI2cCore
         /// <returns></returns>
         private bool TransferCommand(int command)
         {
+            if (!_wire.ReadyState) return false;
+
             // TODO: optimize to reduce allocations
             return _wire.SendBytes(new[] {_address, MODE_COMMAND, (byte)command});
         }
@@ -538,9 +593,11 @@ namespace OledI2cCore
         /// screen. If the system determines more than 1/7 of the screen is dirty
         /// it will force a full update
         /// </summary>
-        public void UpdateDirtyBytes()
+        public bool UpdateDirtyBytes()
         {
-            if (_dirtyBytes.Count == 0) return;
+            bool success = true;
+
+            if (_dirtyBytes.Count == 0) return success;
 
             var byteArray = _dirtyBytes.ToArray();
             var blen = byteArray.Length;
@@ -562,20 +619,21 @@ namespace OledI2cCore
                     var page = (byte) Math.Floor((double) byteIndex / Width);
                     var col = (byte) Math.Floor((double) byteIndex % Width);
 
-                    var sent = GoCoordinate(col, page);
+                    success = GoCoordinate(col, page);
 
-                    if (sent)
+                    if (success)
                     {
                         // send byte, then move on to next byte
                         //sent = TransferData(_screenBuffer[byte1]);
-                        sent = TransferData(new[] {_screenBuffer[byteIndex]});
-                        if (!sent) _logger?.Info($"Failed Sending Data {_screenBuffer[byteIndex]:X}");
+                        success = TransferData(new[] {_screenBuffer[byteIndex]});
+                        if (!success) _logger?.Info($"Failed Sending Data {_screenBuffer[byteIndex]:X}");
                     }
                 }
             }
 
             // now that all bytes are synced, reset dirty state
             _dirtyBytes.Clear();
+            return success;
         }
 
         /// <summary>

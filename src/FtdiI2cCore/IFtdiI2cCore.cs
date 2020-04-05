@@ -1,6 +1,8 @@
-﻿namespace FtdiCore
+﻿using System;
+
+namespace FtdiCore
 {
-    public interface IFtdiI2cCore
+    public interface IFtdiI2cCore : IDisposable
     {
         uint DeviceIndex { get; }
         bool ReadByteAndSendNAK();
@@ -12,9 +14,21 @@
         void SetI2CStart();
         void SetI2CStop();
         bool SetupMpsse();
-        void ShutdownFtdi();
+        bool ShutdownFtdi();
         void ScanDevicesAndQuit();
 
         bool GetPinStatus(byte mask);
+
+        void InitCommandRegister(Func<bool> execute);
+
+        void InitCommandReset();
+
+        void InitAutoReconnectStart();
+
+        void InitAutoReconnectStop();
+
+        event EventHandler<bool> FtdiInitializeStateChanged;
+
+        bool Ready { get; }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 using FtdiCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using OledI2cCore;
@@ -18,11 +19,56 @@ namespace Oled_i2c_bus_core_tests
         private static readonly Logger Logger = new Logger();
         private const uint DeviceIndexForTesting = 0;
 
+        [TestMethod]
+        public async Task AutoReconnect()
+        {
+            // Create the I2C Controller
+            var ftdi = new FtdiI2cCore(DeviceIndexForTesting, Logger);
+
+            ftdi.InitCommandRegister(() =>
+            {
+                if (!ftdi.SetupMpsse())
+                {
+                    Assert.Fail("Could not Init Mpsse on FTDI chip");
+                    return false;
+                }
+
+                return true;
+            });
+
+            var oled = new OledCore(new I2CWrapper2(ftdi, Logger), 128, 64, logger: Logger,
+                screenDriver: DefaultTestScreenDriver);
+
+            oled.InitCommandRegister(() =>
+            {
+                var r = oled.Initialise();
+                Assert.IsTrue(r, "Failed to init oled");
+                return r;
+            });
+
+            oled.InitCommandRegister(() =>
+            {
+                oled.WriteString(0, 0, "My Test 1", 1.6);
+                oled.UpdateDirtyBytes();
+                return true;
+            });
+        
+
+            ftdi.InitAutoReconnectStart();
+
+            Assert.IsTrue(ftdi.Ready, "Failed to init ftdi");
+
+            // Delay so it can be tested.
+            await Task.Delay(TimeSpan.FromSeconds(10));
+
+        }
+
+
         /// <summary>
-        /// Get the Oled ready for testing.
-        /// </summary>
-        /// <returns></returns>
-        private static OledCore GetOledForTesting()
+            /// Get the Oled ready for testing.
+            /// </summary>
+            /// <returns></returns>
+            private static OledCore GetOledForTesting()
         {
             // Create the I2C Controller
             var i2C = new FtdiI2cCore(DeviceIndexForTesting, Logger);
@@ -73,7 +119,7 @@ namespace Oled_i2c_bus_core_tests
         {
             var oled = GetOledForTesting();
 
-            oled.DrawLine(0, (byte) (oled.Height / 2), oled.Width, (byte) (oled.Height / 2), 1);
+            oled.DrawLine(0, (byte) (oled.Height / 2), oled.Width, (byte) (oled.Height / 2), ScreenColor.White);
 
             oled.Update();
         }
@@ -220,11 +266,27 @@ namespace Oled_i2c_bus_core_tests
         {
             _i2CWire = i2cWire;
             _logger = logger;
+
+            _i2CWire.FtdiInitializeStateChanged += I2CWireOnFtdiInitializeStateChanged;
         }
-        
+
+        private void I2CWireOnFtdiInitializeStateChanged(object? sender, bool e)
+        {
+            OnReadyStateChanged(e);
+        }
+
         public bool SendBytes(byte[] dataBuffer)
         {
             return _i2CWire.SendBytes(dataBuffer);
+        }
+
+        public event EventHandler<bool> ReadyStateChanged;
+
+        public bool ReadyState => _i2CWire.Ready;
+
+        protected virtual void OnReadyStateChanged(bool e)
+        {
+            ReadyStateChanged?.Invoke(this, e);
         }
     }
 }

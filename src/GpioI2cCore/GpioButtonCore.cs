@@ -8,8 +8,8 @@ namespace GpioI2cCore
     {
         private readonly II2C _i2CWire;
         private readonly GpioPin _pinToMonitor;
-        private Timer _buttonCheckTimer;
         private GpioPressState _lastState = GpioPressState.NotChecked;
+        private bool _isRunning = true;
 
         public GpioButtonCore(II2C i2cWire, GpioPin pinToMonitor)
         {
@@ -17,35 +17,48 @@ namespace GpioI2cCore
             _pinToMonitor = pinToMonitor;
         }
 
-        public void Initialize()
+        public bool Initialize()
         {
-            _buttonCheckTimer = new Timer((Callback), null, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(50));
+            _isRunning = true;
+            var thread = new Thread(ProcessLoop)
+            {
+                Name = "ButtonPressLoop",
+                IsBackground = true
+            };
+            thread.Start();
+
+            return true;
         }
 
         public void UnInitialize()
         {
-            _buttonCheckTimer.Dispose();
+            _isRunning = false;
         }
 
-        private void Callback(object state)
+        private void ProcessLoop()
         {
-            try
+            while (_isRunning)
             {
-                var result = _i2CWire.GetPinStatus((byte) _pinToMonitor);
-                var newState = result ? GpioPressState.Pressed : GpioPressState.NotPressed;
-
-                if (newState != _lastState)
+                try
                 {
-                    _lastState = newState;
-                    OnPressState(newState);
+                    var result = _i2CWire.GetPinStatus((byte) _pinToMonitor);
+                    var newState = result ? GpioPressState.Pressed : GpioPressState.NotPressed;
+
+                    if (newState != _lastState)
+                    {
+                        _lastState = newState;
+                        OnPressState(newState);
+                        Debug.WriteLine($"State: {result}");
+                    }
                 }
-
-                Debug.WriteLine($"State: {result}");
-
-            }
-            catch
-            {
-                // Ignore
+                catch
+                {
+                    // Ignore
+                }
+                finally
+                {
+                    Thread.Sleep(50);
+                }
             }
         }
 

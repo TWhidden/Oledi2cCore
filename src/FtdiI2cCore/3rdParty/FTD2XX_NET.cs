@@ -35,13 +35,16 @@ namespace FtdiCore._3rdParty
     /// </summary>
     public class FTDI
     {
+        private readonly ILogger _logger;
+
         #region CONSTRUCTOR_DESTRUCTOR
         // constructor
         /// <summary>
         /// Constructor for the FTDI class.
         /// </summary>
-        public FTDI()
+        public FTDI(ILogger logger)
         {
+            _logger = logger;
             string libraryToLoad = "FTD2XX.dll";
 
             if (Environment.OSVersion.Platform == PlatformID.Unix)
@@ -51,14 +54,17 @@ namespace FtdiCore._3rdParty
 
             if (hFTD2XXDLL == IntPtr.Zero)
             {
+                _logger.Info($"Loading Native Library '{libraryToLoad}' ...");
                 _nativeLibrary = new NativeLibraryLoader.NativeLibrary(libraryToLoad);
                 hFTD2XXDLL = _nativeLibrary.Handle;
 
                 if (hFTD2XXDLL == IntPtr.Zero)
                 {
+                    _logger.Info("Could not load the FTD2XX native assembvly!");
                     throw new Exception("Could not load the FTD2XX native assembly");
                 }
 
+                _logger.Info("Finding Function Pointers...");
                 FindFunctionPointers();
             }
         }
@@ -134,19 +140,7 @@ namespace FtdiCore._3rdParty
 
         #region LOAD_LIBRARIES
 
-        /// <summary>
-        /// Built-in Windows API functions to allow us to dynamically load our own DLL.
-        /// Will allow us to use old versions of the DLL that do not have all of these functions available.
-        /// </summary>
-        //[DllImport("kernel32.dll")]
-        //private static extern IntPtr LoadLibrary(string dllToLoad);
-        //[DllImport("kernel32.dll")]
-        //private static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
-        //[DllImport("kernel32.dll")]
-        //private static extern bool FreeLibrary(IntPtr hModule);
-
         private static NativeLibraryLoader.NativeLibrary _nativeLibrary;
-
 
         #endregion
 
@@ -912,7 +906,7 @@ namespace FtdiCore._3rdParty
 
         #region VARIABLES
         // Create private variables for the device within the class
-        private IntPtr ftHandle = IntPtr.Zero;
+        private IntPtr _ftHandle = IntPtr.Zero;
         #endregion
 
         #region TYPEDEFS
@@ -2046,19 +2040,23 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_CreateDeviceInfoList != IntPtr.Zero)
             {
                 tFT_CreateDeviceInfoList FT_CreateDeviceInfoList = (tFT_CreateDeviceInfoList)Marshal.GetDelegateForFunctionPointer(pFT_CreateDeviceInfoList, typeof(tFT_CreateDeviceInfoList));
 
+
                 // Call FT_CreateDeviceInfoList
                 ftStatus = FT_CreateDeviceInfoList(ref devcount);
             }
             else
             {
-                Console.WriteLine("Failed to load function FT_CreateDeviceInfoList.");
+                _logger.Info("Failed to load function FT_CreateDeviceInfoList.");
             }
             return ftStatus;
 
@@ -2084,7 +2082,16 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
+
+            // Clear the device list
+            for (var i = 0; i < devicelist.Length; i++)
+            {
+                devicelist[i] = null;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_CreateDeviceInfoList != IntPtr.Zero) & (pFT_GetDeviceInfoDetail != IntPtr.Zero))
@@ -2098,7 +2105,6 @@ namespace FtdiCore._3rdParty
                 ftStatus = FT_CreateDeviceInfoList(ref devcount);
 
                 // Allocate the required storage for our list
-
                 byte[] sernum = new byte[16];
                 byte[] desc = new byte[64];
 
@@ -2107,6 +2113,7 @@ namespace FtdiCore._3rdParty
                     // Check the size of the buffer passed in is big enough
                     if (devicelist.Length < devcount)
                     {
+                        _logger.Info($"Device List buffer too small for total devices connected");
                         // Buffer not big enough
                         ftErrorCondition = FT_ERROR.FT_BUFFER_SIZE;
                         // Throw exception
@@ -2136,12 +2143,12 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_CreateDeviceInfoList == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_CreateDeviceInfoList.");
+                    _logger.Info("Failed to load function FT_CreateDeviceInfoList.");
 
                 }
                 if (pFT_GetDeviceInfoDetail == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetDeviceInfoListDetail.");
+                    _logger.Info("Failed to load function FT_GetDeviceInfoListDetail.");
                 }
             }
             return ftStatus;
@@ -2166,7 +2173,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_Open != IntPtr.Zero) & (pFT_SetDataCharacteristics != IntPtr.Zero) & (pFT_SetFlowControl != IntPtr.Zero) & (pFT_SetBaudRate != IntPtr.Zero))
@@ -2177,49 +2187,49 @@ namespace FtdiCore._3rdParty
                 tFT_SetBaudRate FT_SetBaudRate = (tFT_SetBaudRate)Marshal.GetDelegateForFunctionPointer(pFT_SetBaudRate, typeof(tFT_SetBaudRate));
 
                 // Call FT_Open
-                ftStatus = FT_Open(index, ref ftHandle);
+                ftStatus = FT_Open(index, ref _ftHandle);
 
                 // Appears that the handle value can be non-NULL on a fail, so set it explicitly
                 if (ftStatus != FT_STATUS.FT_OK)
                 {
-                    ftHandle = IntPtr.Zero;
-                    Console.WriteLine($"FT Result: {ftStatus}");
+                    _ftHandle = IntPtr.Zero;
+                    _logger.Info($"FT Result: {ftStatus}");
                 }
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Initialise port data characteristics
                     byte WordLength = FT_DATA_BITS.FT_BITS_8;
                     byte StopBits = FT_STOP_BITS.FT_STOP_BITS_1;
                     byte Parity = FT_PARITY.FT_PARITY_NONE;
-                    ftStatus = FT_SetDataCharacteristics(ftHandle, WordLength, StopBits, Parity);
+                    ftStatus = FT_SetDataCharacteristics(_ftHandle, WordLength, StopBits, Parity);
                     // Initialise to no flow control
                     UInt16 FlowControl = FT_FLOW_CONTROL.FT_FLOW_NONE;
                     byte Xon = 0x11;
                     byte Xoff = 0x13;
-                    ftStatus = FT_SetFlowControl(ftHandle, FlowControl, Xon, Xoff);
+                    ftStatus = FT_SetFlowControl(_ftHandle, FlowControl, Xon, Xoff);
                     // Initialise Baud rate
                     UInt32 BaudRate = 9600;
-                    ftStatus = FT_SetBaudRate(ftHandle, BaudRate);
+                    ftStatus = FT_SetBaudRate(_ftHandle, BaudRate);
                 }
             }
             else
             {
                 if (pFT_Open == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Open.");
+                    _logger.Info("Failed to load function FT_Open.");
                 }
                 if (pFT_SetDataCharacteristics == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetDataCharacteristics.");
+                    _logger.Info("Failed to load function FT_SetDataCharacteristics.");
                 }
                 if (pFT_SetFlowControl == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetFlowControl.");
+                    _logger.Info("Failed to load function FT_SetFlowControl.");
                 }
                 if (pFT_SetBaudRate == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBaudRate.");
+                    _logger.Info("Failed to load function FT_SetBaudRate.");
                 }
             }
             return ftStatus;
@@ -2243,7 +2253,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_OpenEx != IntPtr.Zero) & (pFT_SetDataCharacteristics != IntPtr.Zero) & (pFT_SetFlowControl != IntPtr.Zero) & (pFT_SetBaudRate != IntPtr.Zero))
@@ -2254,46 +2267,46 @@ namespace FtdiCore._3rdParty
                 tFT_SetBaudRate FT_SetBaudRate = (tFT_SetBaudRate)Marshal.GetDelegateForFunctionPointer(pFT_SetBaudRate, typeof(tFT_SetBaudRate));
 
                 // Call FT_OpenEx
-                ftStatus = FT_OpenEx(serialnumber, FT_OPEN_BY_SERIAL_NUMBER, ref ftHandle);
+                ftStatus = FT_OpenEx(serialnumber, FT_OPEN_BY_SERIAL_NUMBER, ref _ftHandle);
 
                 // Appears that the handle value can be non-NULL on a fail, so set it explicitly
                 if (ftStatus != FT_STATUS.FT_OK)
-                    ftHandle = IntPtr.Zero;
+                    _ftHandle = IntPtr.Zero;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Initialise port data characteristics
                     byte WordLength = FT_DATA_BITS.FT_BITS_8;
                     byte StopBits = FT_STOP_BITS.FT_STOP_BITS_1;
                     byte Parity = FT_PARITY.FT_PARITY_NONE;
-                    ftStatus = FT_SetDataCharacteristics(ftHandle, WordLength, StopBits, Parity);
+                    ftStatus = FT_SetDataCharacteristics(_ftHandle, WordLength, StopBits, Parity);
                     // Initialise to no flow control
                     UInt16 FlowControl = FT_FLOW_CONTROL.FT_FLOW_NONE;
                     byte Xon = 0x11;
                     byte Xoff = 0x13;
-                    ftStatus = FT_SetFlowControl(ftHandle, FlowControl, Xon, Xoff);
+                    ftStatus = FT_SetFlowControl(_ftHandle, FlowControl, Xon, Xoff);
                     // Initialise Baud rate
                     UInt32 BaudRate = 9600;
-                    ftStatus = FT_SetBaudRate(ftHandle, BaudRate);
+                    ftStatus = FT_SetBaudRate(_ftHandle, BaudRate);
                 }
             }
             else
             {
                 if (pFT_OpenEx == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_OpenEx.");
+                    _logger.Info("Failed to load function FT_OpenEx.");
                 }
                 if (pFT_SetDataCharacteristics == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetDataCharacteristics.");
+                    _logger.Info("Failed to load function FT_SetDataCharacteristics.");
                 }
                 if (pFT_SetFlowControl == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetFlowControl.");
+                    _logger.Info("Failed to load function FT_SetFlowControl.");
                 }
                 if (pFT_SetBaudRate == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBaudRate.");
+                    _logger.Info("Failed to load function FT_SetBaudRate.");
                 }
             }
             return ftStatus;
@@ -2317,7 +2330,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_OpenEx != IntPtr.Zero) & (pFT_SetDataCharacteristics != IntPtr.Zero) & (pFT_SetFlowControl != IntPtr.Zero) & (pFT_SetBaudRate != IntPtr.Zero))
@@ -2328,46 +2344,46 @@ namespace FtdiCore._3rdParty
                 tFT_SetBaudRate FT_SetBaudRate = (tFT_SetBaudRate)Marshal.GetDelegateForFunctionPointer(pFT_SetBaudRate, typeof(tFT_SetBaudRate));
 
                 // Call FT_OpenEx
-                ftStatus = FT_OpenEx(description, FT_OPEN_BY_DESCRIPTION, ref ftHandle);
+                ftStatus = FT_OpenEx(description, FT_OPEN_BY_DESCRIPTION, ref _ftHandle);
 
                 // Appears that the handle value can be non-NULL on a fail, so set it explicitly
                 if (ftStatus != FT_STATUS.FT_OK)
-                    ftHandle = IntPtr.Zero;
+                    _ftHandle = IntPtr.Zero;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Initialise port data characteristics
                     byte WordLength = FT_DATA_BITS.FT_BITS_8;
                     byte StopBits = FT_STOP_BITS.FT_STOP_BITS_1;
                     byte Parity = FT_PARITY.FT_PARITY_NONE;
-                    ftStatus = FT_SetDataCharacteristics(ftHandle, WordLength, StopBits, Parity);
+                    ftStatus = FT_SetDataCharacteristics(_ftHandle, WordLength, StopBits, Parity);
                     // Initialise to no flow control
                     UInt16 FlowControl = FT_FLOW_CONTROL.FT_FLOW_NONE;
                     byte Xon = 0x11;
                     byte Xoff = 0x13;
-                    ftStatus = FT_SetFlowControl(ftHandle, FlowControl, Xon, Xoff);
+                    ftStatus = FT_SetFlowControl(_ftHandle, FlowControl, Xon, Xoff);
                     // Initialise Baud rate
                     UInt32 BaudRate = 9600;
-                    ftStatus = FT_SetBaudRate(ftHandle, BaudRate);
+                    ftStatus = FT_SetBaudRate(_ftHandle, BaudRate);
                 }
             }
             else
             {
                 if (pFT_OpenEx == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_OpenEx.");
+                    _logger.Info("Failed to load function FT_OpenEx.");
                 }
                 if (pFT_SetDataCharacteristics == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetDataCharacteristics.");
+                    _logger.Info("Failed to load function FT_SetDataCharacteristics.");
                 }
                 if (pFT_SetFlowControl == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetFlowControl.");
+                    _logger.Info("Failed to load function FT_SetFlowControl.");
                 }
                 if (pFT_SetBaudRate == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBaudRate.");
+                    _logger.Info("Failed to load function FT_SetBaudRate.");
                 }
             }
             return ftStatus;
@@ -2391,7 +2407,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_OpenEx != IntPtr.Zero) & (pFT_SetDataCharacteristics != IntPtr.Zero) & (pFT_SetFlowControl != IntPtr.Zero) & (pFT_SetBaudRate != IntPtr.Zero))
@@ -2402,46 +2421,46 @@ namespace FtdiCore._3rdParty
                 tFT_SetBaudRate FT_SetBaudRate = (tFT_SetBaudRate)Marshal.GetDelegateForFunctionPointer(pFT_SetBaudRate, typeof(tFT_SetBaudRate));
 
                 // Call FT_OpenEx
-                ftStatus = FT_OpenEx(location, FT_OPEN_BY_LOCATION, ref ftHandle);
+                ftStatus = FT_OpenEx(location, FT_OPEN_BY_LOCATION, ref _ftHandle);
 
                 // Appears that the handle value can be non-NULL on a fail, so set it explicitly
                 if (ftStatus != FT_STATUS.FT_OK)
-                    ftHandle = IntPtr.Zero;
+                    _ftHandle = IntPtr.Zero;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Initialise port data characteristics
                     byte WordLength = FT_DATA_BITS.FT_BITS_8;
                     byte StopBits = FT_STOP_BITS.FT_STOP_BITS_1;
                     byte Parity = FT_PARITY.FT_PARITY_NONE;
-                    ftStatus = FT_SetDataCharacteristics(ftHandle, WordLength, StopBits, Parity);
+                    ftStatus = FT_SetDataCharacteristics(_ftHandle, WordLength, StopBits, Parity);
                     // Initialise to no flow control
                     UInt16 FlowControl = FT_FLOW_CONTROL.FT_FLOW_NONE;
                     byte Xon = 0x11;
                     byte Xoff = 0x13;
-                    ftStatus = FT_SetFlowControl(ftHandle, FlowControl, Xon, Xoff);
+                    ftStatus = FT_SetFlowControl(_ftHandle, FlowControl, Xon, Xoff);
                     // Initialise Baud rate
                     UInt32 BaudRate = 9600;
-                    ftStatus = FT_SetBaudRate(ftHandle, BaudRate);
+                    ftStatus = FT_SetBaudRate(_ftHandle, BaudRate);
                 }
             }
             else
             {
                 if (pFT_OpenEx == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_OpenEx.");
+                    _logger.Info("Failed to load function FT_OpenEx.");
                 }
                 if (pFT_SetDataCharacteristics == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetDataCharacteristics.");
+                    _logger.Info("Failed to load function FT_SetDataCharacteristics.");
                 }
                 if (pFT_SetFlowControl == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetFlowControl.");
+                    _logger.Info("Failed to load function FT_SetFlowControl.");
                 }
                 if (pFT_SetBaudRate == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBaudRate.");
+                    _logger.Info("Failed to load function FT_SetBaudRate.");
                 }
             }
             return ftStatus;
@@ -2463,7 +2482,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Close != IntPtr.Zero)
@@ -2471,18 +2493,19 @@ namespace FtdiCore._3rdParty
                 tFT_Close FT_Close = (tFT_Close)Marshal.GetDelegateForFunctionPointer(pFT_Close, typeof(tFT_Close));
 
                 // Call FT_Close
-                ftStatus = FT_Close(ftHandle);
+                ftStatus = FT_Close(_ftHandle);
+                _logger.Info($"FT_Close: {ftStatus}");
 
                 if (ftStatus == FT_STATUS.FT_OK)
                 {
-                    ftHandle = IntPtr.Zero;
+                    _ftHandle = IntPtr.Zero;
                 }
             }
             else
             {
                 if (pFT_Close == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Close.");
+                    _logger.Info("Failed to load function FT_Close.");
                 }
             }
             return ftStatus;
@@ -2507,7 +2530,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Read != IntPtr.Zero)
@@ -2521,17 +2547,17 @@ namespace FtdiCore._3rdParty
                     numBytesToRead = (uint)dataBuffer.Length;
                 }
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_Read
-                    ftStatus = FT_Read(ftHandle, dataBuffer, numBytesToRead, ref numBytesRead);
+                    ftStatus = FT_Read(_ftHandle, dataBuffer, numBytesToRead, ref numBytesRead);
                 }
             }
             else
             {
                 if (pFT_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Read.");
+                    _logger.Info("Failed to load function FT_Read.");
                 }
             }
             return ftStatus;
@@ -2555,7 +2581,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Read != IntPtr.Zero)
@@ -2564,10 +2593,10 @@ namespace FtdiCore._3rdParty
 
                 byte[] byteDataBuffer = new byte[numBytesToRead];
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_Read
-                    ftStatus = FT_Read(ftHandle, byteDataBuffer, numBytesToRead, ref numBytesRead);
+                    ftStatus = FT_Read(_ftHandle, byteDataBuffer, numBytesToRead, ref numBytesRead);
 
                     // Convert ASCII byte array back to Unicode string for passing back
                     dataBuffer = Encoding.ASCII.GetString(byteDataBuffer);
@@ -2579,7 +2608,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Read.");
+                    _logger.Info("Failed to load function FT_Read.");
                 }
             }
             return ftStatus;
@@ -2603,24 +2632,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Write != IntPtr.Zero)
             {
                 tFT_Write FT_Write = (tFT_Write)Marshal.GetDelegateForFunctionPointer(pFT_Write, typeof(tFT_Write));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_Write
-                    ftStatus = FT_Write(ftHandle, dataBuffer, (UInt32)numBytesToWrite, ref numBytesWritten);
+                    ftStatus = FT_Write(_ftHandle, dataBuffer, (UInt32)numBytesToWrite, ref numBytesWritten);
                 }
             }
             else
             {
                 if (pFT_Write == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Write.");
+                    _logger.Info("Failed to load function FT_Write.");
                 }
             }
             return ftStatus;
@@ -2641,24 +2673,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Write != IntPtr.Zero)
             {
                 tFT_Write FT_Write = (tFT_Write)Marshal.GetDelegateForFunctionPointer(pFT_Write, typeof(tFT_Write));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_Write
-                    ftStatus = FT_Write(ftHandle, dataBuffer, numBytesToWrite, ref numBytesWritten);
+                    ftStatus = FT_Write(_ftHandle, dataBuffer, numBytesToWrite, ref numBytesWritten);
                 }
             }
             else
             {
                 if (pFT_Write == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Write.");
+                    _logger.Info("Failed to load function FT_Write.");
                 }
             }
             return ftStatus;
@@ -2679,7 +2714,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Write != IntPtr.Zero)
@@ -2689,17 +2727,17 @@ namespace FtdiCore._3rdParty
                 // Convert Unicode string to ASCII byte array
                 byte[] byteDataBuffer = Encoding.ASCII.GetBytes(dataBuffer);
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_Write
-                    ftStatus = FT_Write(ftHandle, byteDataBuffer, (UInt32)numBytesToWrite, ref numBytesWritten);
+                    ftStatus = FT_Write(_ftHandle, byteDataBuffer, (UInt32)numBytesToWrite, ref numBytesWritten);
                 }
             }
             else
             {
                 if (pFT_Write == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Write.");
+                    _logger.Info("Failed to load function FT_Write.");
                 }
             }
             return ftStatus;
@@ -2720,7 +2758,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Write != IntPtr.Zero)
@@ -2730,17 +2771,17 @@ namespace FtdiCore._3rdParty
                 // Convert Unicode string to ASCII byte array
                 byte[] byteDataBuffer = Encoding.ASCII.GetBytes(dataBuffer);
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_Write
-                    ftStatus = FT_Write(ftHandle, byteDataBuffer, numBytesToWrite, ref numBytesWritten);
+                    ftStatus = FT_Write(_ftHandle, byteDataBuffer, numBytesToWrite, ref numBytesWritten);
                 }
             }
             else
             {
                 if (pFT_Write == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Write.");
+                    _logger.Info("Failed to load function FT_Write.");
                 }
             }
             return ftStatus;
@@ -2761,24 +2802,26 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_ResetDevice != IntPtr.Zero)
             {
                 tFT_ResetDevice FT_ResetDevice = (tFT_ResetDevice)Marshal.GetDelegateForFunctionPointer(pFT_ResetDevice, typeof(tFT_ResetDevice));
-
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_ResetDevice
-                    ftStatus = FT_ResetDevice(ftHandle);
+                    ftStatus = FT_ResetDevice(_ftHandle);
                 }
             }
             else
             {
                 if (pFT_ResetDevice == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_ResetDevice.");
+                    _logger.Info("Failed to load function FT_ResetDevice.");
                 }
             }
             return ftStatus;
@@ -2800,24 +2843,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_Purge != IntPtr.Zero)
             {
                 tFT_Purge FT_Purge = (tFT_Purge)Marshal.GetDelegateForFunctionPointer(pFT_Purge, typeof(tFT_Purge));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_Purge
-                    ftStatus = FT_Purge(ftHandle, purgemask);
+                    ftStatus = FT_Purge(_ftHandle, purgemask);
                 }
             }
             else
             {
                 if (pFT_Purge == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Purge.");
+                    _logger.Info("Failed to load function FT_Purge.");
                 }
             }
             return ftStatus;
@@ -2841,24 +2887,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetEventNotification != IntPtr.Zero)
             {
                 tFT_SetEventNotification FT_SetEventNotification = (tFT_SetEventNotification)Marshal.GetDelegateForFunctionPointer(pFT_SetEventNotification, typeof(tFT_SetEventNotification));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetSetEventNotification
-                    ftStatus = FT_SetEventNotification(ftHandle, eventmask, eventhandle.SafeWaitHandle);
+                    ftStatus = FT_SetEventNotification(_ftHandle, eventmask, eventhandle.SafeWaitHandle);
                 }
             }
             else
             {
                 if (pFT_SetEventNotification == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetEventNotification.");
+                    _logger.Info("Failed to load function FT_SetEventNotification.");
                 }
             }
             return ftStatus;
@@ -2879,24 +2928,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_StopInTask != IntPtr.Zero)
             {
                 tFT_StopInTask FT_StopInTask = (tFT_StopInTask)Marshal.GetDelegateForFunctionPointer(pFT_StopInTask, typeof(tFT_StopInTask));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_StopInTask
-                    ftStatus = FT_StopInTask(ftHandle);
+                    ftStatus = FT_StopInTask(_ftHandle);
                 }
             }
             else
             {
                 if (pFT_StopInTask == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_StopInTask.");
+                    _logger.Info("Failed to load function FT_StopInTask.");
                 }
             }
             return ftStatus;
@@ -2917,24 +2969,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_RestartInTask != IntPtr.Zero)
             {
                 tFT_RestartInTask FT_RestartInTask = (tFT_RestartInTask)Marshal.GetDelegateForFunctionPointer(pFT_RestartInTask, typeof(tFT_RestartInTask));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_RestartInTask
-                    ftStatus = FT_RestartInTask(ftHandle);
+                    ftStatus = FT_RestartInTask(_ftHandle);
                 }
             }
             else
             {
                 if (pFT_RestartInTask == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_RestartInTask.");
+                    _logger.Info("Failed to load function FT_RestartInTask.");
                 }
             }
             return ftStatus;
@@ -2955,24 +3010,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_ResetPort != IntPtr.Zero)
             {
                 tFT_ResetPort FT_ResetPort = (tFT_ResetPort)Marshal.GetDelegateForFunctionPointer(pFT_ResetPort, typeof(tFT_ResetPort));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_ResetPort
-                    ftStatus = FT_ResetPort(ftHandle);
+                    ftStatus = FT_ResetPort(_ftHandle);
                 }
             }
             else
             {
                 if (pFT_ResetPort == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_ResetPort.");
+                    _logger.Info("Failed to load function FT_ResetPort.");
                 }
             }
             return ftStatus;
@@ -2994,7 +3052,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_CyclePort != IntPtr.Zero) & (pFT_Close != IntPtr.Zero))
@@ -3002,17 +3063,19 @@ namespace FtdiCore._3rdParty
                 tFT_CyclePort FT_CyclePort = (tFT_CyclePort)Marshal.GetDelegateForFunctionPointer(pFT_CyclePort, typeof(tFT_CyclePort));
                 tFT_Close FT_Close = (tFT_Close)Marshal.GetDelegateForFunctionPointer(pFT_Close, typeof(tFT_Close));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_CyclePort
-                    ftStatus = FT_CyclePort(ftHandle);
+                    ftStatus = FT_CyclePort(_ftHandle);
+                    _logger.Info($"FT_CyclePort Result: {ftStatus}");
                     if (ftStatus == FT_STATUS.FT_OK)
                     {
                         // If successful, call FT_Close
-                        ftStatus = FT_Close(ftHandle);
+                        ftStatus = FT_Close(_ftHandle);
+                        _logger.Info($"FT_Close Result: {ftStatus}");
                         if (ftStatus == FT_STATUS.FT_OK)
                         {
-                            ftHandle = IntPtr.Zero;
+                            _ftHandle = IntPtr.Zero;
                         }
                     }
                 }
@@ -3021,11 +3084,11 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_CyclePort == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_CyclePort.");
+                    _logger.Info("Failed to load function FT_CyclePort.");
                 }
                 if (pFT_Close == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Close.");
+                    _logger.Info("Failed to load function FT_Close.");
                 }
             }
             return ftStatus;
@@ -3060,7 +3123,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_Rescan == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Rescan.");
+                    _logger.Info("Failed to load function FT_Rescan.");
                 }
             }
             return ftStatus;
@@ -3098,7 +3161,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_Reload == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_Reload.");
+                    _logger.Info("Failed to load function FT_Reload.");
                 }
             }
             return ftStatus;
@@ -3137,7 +3200,7 @@ namespace FtdiCore._3rdParty
             {
                 tFT_SetBitMode FT_SetBitMode = (tFT_SetBitMode)Marshal.GetDelegateForFunctionPointer(pFT_SetBitMode, typeof(tFT_SetBitMode));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
 
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
@@ -3235,14 +3298,14 @@ namespace FtdiCore._3rdParty
                     // Requested bit mode is supported
                     // Note FT_BIT_MODES.FT_BIT_MODE_RESET falls through to here - no bits set so cannot check for AND
                     // Call FT_SetBitMode
-                    ftStatus = FT_SetBitMode(ftHandle, Mask, BitMode);
+                    ftStatus = FT_SetBitMode(_ftHandle, Mask, BitMode);
                 }
             }
             else
             {
                 if (pFT_SetBitMode == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBitMode.");
+                    _logger.Info("Failed to load function FT_SetBitMode.");
                 }
             }
             return ftStatus;
@@ -3271,17 +3334,17 @@ namespace FtdiCore._3rdParty
             {
                 tFT_GetBitMode FT_GetBitMode = (tFT_GetBitMode)Marshal.GetDelegateForFunctionPointer(pFT_GetBitMode, typeof(tFT_GetBitMode));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetBitMode
-                    ftStatus = FT_GetBitMode(ftHandle, ref BitMode);
+                    ftStatus = FT_GetBitMode(_ftHandle, ref BitMode);
                 }
             }
             else
             {
                 if (pFT_GetBitMode == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetBitMode.");
+                    _logger.Info("Failed to load function FT_GetBitMode.");
                 }
             }
             return ftStatus;
@@ -3311,17 +3374,17 @@ namespace FtdiCore._3rdParty
             {
                 tFT_ReadEE FT_ReadEE = (tFT_ReadEE)Marshal.GetDelegateForFunctionPointer(pFT_ReadEE, typeof(tFT_ReadEE));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_ReadEE
-                    ftStatus = FT_ReadEE(ftHandle, Address, ref EEValue);
+                    ftStatus = FT_ReadEE(_ftHandle, Address, ref EEValue);
                 }
             }
             else
             {
                 if (pFT_ReadEE == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_ReadEE.");
+                    _logger.Info("Failed to load function FT_ReadEE.");
                 }
             }
             return ftStatus;
@@ -3351,17 +3414,17 @@ namespace FtdiCore._3rdParty
             {
                 tFT_WriteEE FT_WriteEE = (tFT_WriteEE)Marshal.GetDelegateForFunctionPointer(pFT_WriteEE, typeof(tFT_WriteEE));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_WriteEE
-                    ftStatus = FT_WriteEE(ftHandle, Address, EEValue);
+                    ftStatus = FT_WriteEE(_ftHandle, Address, EEValue);
                 }
             }
             else
             {
                 if (pFT_WriteEE == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_WriteEE.");
+                    _logger.Info("Failed to load function FT_WriteEE.");
                 }
             }
             return ftStatus;
@@ -3391,7 +3454,7 @@ namespace FtdiCore._3rdParty
             {
                 tFT_EraseEE FT_EraseEE = (tFT_EraseEE)Marshal.GetDelegateForFunctionPointer(pFT_EraseEE, typeof(tFT_EraseEE));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is not an FT232R or FT245R that we are trying to erase
@@ -3404,14 +3467,14 @@ namespace FtdiCore._3rdParty
                     }
 
                     // Call FT_EraseEE
-                    ftStatus = FT_EraseEE(ftHandle);
+                    ftStatus = FT_EraseEE(_ftHandle);
                 }
             }
             else
             {
                 if (pFT_EraseEE == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EraseEE.");
+                    _logger.Info("Failed to load function FT_EraseEE.");
                 }
             }
             return ftStatus;
@@ -3442,7 +3505,7 @@ namespace FtdiCore._3rdParty
             {
                 tFT_EE_Read FT_EE_Read = (tFT_EE_Read)Marshal.GetDelegateForFunctionPointer(pFT_EE_Read, typeof(tFT_EE_Read));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232B or FT245B that we are trying to read
@@ -3468,7 +3531,7 @@ namespace FtdiCore._3rdParty
                     eedata.SerialNumber = Marshal.AllocHGlobal(16);
 
                     // Call FT_EE_Read
-                    ftStatus = FT_EE_Read(ftHandle, eedata);
+                    ftStatus = FT_EE_Read(_ftHandle, eedata);
 
                     // Retrieve string values
                     ee232b.Manufacturer = Marshal.PtrToStringAnsi(eedata.Manufacturer);
@@ -3500,7 +3563,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Read.");
+                    _logger.Info("Failed to load function FT_EE_Read.");
                 }
             }
             return ftStatus;
@@ -3531,7 +3594,7 @@ namespace FtdiCore._3rdParty
             {
                 tFT_EE_Read FT_EE_Read = (tFT_EE_Read)Marshal.GetDelegateForFunctionPointer(pFT_EE_Read, typeof(tFT_EE_Read));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT2232 that we are trying to read
@@ -3557,7 +3620,7 @@ namespace FtdiCore._3rdParty
                     eedata.SerialNumber = Marshal.AllocHGlobal(16);
 
                     // Call FT_EE_Read
-                    ftStatus = FT_EE_Read(ftHandle, eedata);
+                    ftStatus = FT_EE_Read(_ftHandle, eedata);
 
                     // Retrieve string values
                     ee2232.Manufacturer = Marshal.PtrToStringAnsi(eedata.Manufacturer);
@@ -3599,7 +3662,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Read.");
+                    _logger.Info("Failed to load function FT_EE_Read.");
                 }
             }
             return ftStatus;
@@ -3630,7 +3693,7 @@ namespace FtdiCore._3rdParty
             {
                 tFT_EE_Read FT_EE_Read = (tFT_EE_Read)Marshal.GetDelegateForFunctionPointer(pFT_EE_Read, typeof(tFT_EE_Read));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232R or FT245R that we are trying to read
@@ -3656,7 +3719,7 @@ namespace FtdiCore._3rdParty
                     eedata.SerialNumber = Marshal.AllocHGlobal(16);
 
                     // Call FT_EE_Read
-                    ftStatus = FT_EE_Read(ftHandle, eedata);
+                    ftStatus = FT_EE_Read(_ftHandle, eedata);
 
                     // Retrieve string values
                     ee232r.Manufacturer = Marshal.PtrToStringAnsi(eedata.Manufacturer);
@@ -3703,7 +3766,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Read.");
+                    _logger.Info("Failed to load function FT_EE_Read.");
                 }
             }
             return ftStatus;
@@ -3727,14 +3790,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Read != IntPtr.Zero)
             {
                 tFT_EE_Read FT_EE_Read = (tFT_EE_Read)Marshal.GetDelegateForFunctionPointer(pFT_EE_Read, typeof(tFT_EE_Read));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT2232H that we are trying to read
@@ -3760,7 +3826,7 @@ namespace FtdiCore._3rdParty
                     eedata.SerialNumber = Marshal.AllocHGlobal(16);
 
                     // Call FT_EE_Read
-                    ftStatus = FT_EE_Read(ftHandle, eedata);
+                    ftStatus = FT_EE_Read(_ftHandle, eedata);
 
                     // Retrieve string values
                     ee2232h.Manufacturer = Marshal.PtrToStringAnsi(eedata.Manufacturer);
@@ -3811,7 +3877,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Read.");
+                    _logger.Info("Failed to load function FT_EE_Read.");
                 }
             }
             return ftStatus;
@@ -3835,14 +3901,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Read != IntPtr.Zero)
             {
                 tFT_EE_Read FT_EE_Read = (tFT_EE_Read)Marshal.GetDelegateForFunctionPointer(pFT_EE_Read, typeof(tFT_EE_Read));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT4232H that we are trying to read
@@ -3868,7 +3937,7 @@ namespace FtdiCore._3rdParty
                     eedata.SerialNumber = Marshal.AllocHGlobal(16);
 
                     // Call FT_EE_Read
-                    ftStatus = FT_EE_Read(ftHandle, eedata);
+                    ftStatus = FT_EE_Read(_ftHandle, eedata);
 
                     // Retrieve string values
                     ee4232h.Manufacturer = Marshal.PtrToStringAnsi(eedata.Manufacturer);
@@ -3918,7 +3987,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Read.");
+                    _logger.Info("Failed to load function FT_EE_Read.");
                 }
             }
             return ftStatus;
@@ -3942,14 +4011,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Read != IntPtr.Zero)
             {
                 tFT_EE_Read FT_EE_Read = (tFT_EE_Read)Marshal.GetDelegateForFunctionPointer(pFT_EE_Read, typeof(tFT_EE_Read));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232H that we are trying to read
@@ -3975,7 +4047,7 @@ namespace FtdiCore._3rdParty
                     eedata.SerialNumber = Marshal.AllocHGlobal(16);
 
                     // Call FT_EE_Read
-                    ftStatus = FT_EE_Read(ftHandle, eedata);
+                    ftStatus = FT_EE_Read(_ftHandle, eedata);
 
                     // Retrieve string values
                     ee232h.Manufacturer = Marshal.PtrToStringAnsi(eedata.Manufacturer);
@@ -4030,7 +4102,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Read.");
+                    _logger.Info("Failed to load function FT_EE_Read.");
                 }
             }
             return ftStatus;
@@ -4054,14 +4126,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EEPROM_Read != IntPtr.Zero)
             {
                 tFT_EEPROM_Read FT_EEPROM_Read = (tFT_EEPROM_Read)Marshal.GetDelegateForFunctionPointer(pFT_EEPROM_Read, typeof(tFT_EEPROM_Read));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232H that we are trying to read
@@ -4092,7 +4167,7 @@ namespace FtdiCore._3rdParty
                     Marshal.StructureToPtr(eeData, eeDataMarshal, false);
                     
                     // Call FT_EEPROM_Read
-                    ftStatus = FT_EEPROM_Read(ftHandle, eeDataMarshal, (uint)size, manufacturer, manufacturerID, description, serialNumber);
+                    ftStatus = FT_EEPROM_Read(_ftHandle, eeDataMarshal, (uint)size, manufacturer, manufacturerID, description, serialNumber);
 
                     if (ftStatus == FT_STATUS.FT_OK)
                     {
@@ -4163,7 +4238,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Read == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Read.");
+                    _logger.Info("Failed to load function FT_EE_Read.");
                 }
             }
             return ftStatus;
@@ -4188,14 +4263,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Program != IntPtr.Zero)
             {
                 tFT_EE_Program FT_EE_Program = (tFT_EE_Program)Marshal.GetDelegateForFunctionPointer(pFT_EE_Program, typeof(tFT_EE_Program));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232B or FT245B that we are trying to write
@@ -4259,7 +4337,7 @@ namespace FtdiCore._3rdParty
                     eedata.USBVersion = ee232b.USBVersion;
 
                     // Call FT_EE_Program
-                    ftStatus = FT_EE_Program(ftHandle, eedata);
+                    ftStatus = FT_EE_Program(_ftHandle, eedata);
 
                     // Free unmanaged buffers
                     Marshal.FreeHGlobal(eedata.Manufacturer);
@@ -4272,7 +4350,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Program == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Program.");
+                    _logger.Info("Failed to load function FT_EE_Program.");
                 }
             }
             return ftStatus;
@@ -4298,14 +4376,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Program != IntPtr.Zero)
             {
                 tFT_EE_Program FT_EE_Program = (tFT_EE_Program)Marshal.GetDelegateForFunctionPointer(pFT_EE_Program, typeof(tFT_EE_Program));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT2232 that we are trying to write
@@ -4379,7 +4460,7 @@ namespace FtdiCore._3rdParty
                     eedata.BIsVCP = Convert.ToByte(ee2232.BIsVCP);
 
                     // Call FT_EE_Program
-                    ftStatus = FT_EE_Program(ftHandle, eedata);
+                    ftStatus = FT_EE_Program(_ftHandle, eedata);
 
                     // Free unmanaged buffers
                     Marshal.FreeHGlobal(eedata.Manufacturer);
@@ -4392,7 +4473,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Program == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Program.");
+                    _logger.Info("Failed to load function FT_EE_Program.");
                 }
             }
             return ftStatus;
@@ -4418,14 +4499,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Program != IntPtr.Zero)
             {
                 tFT_EE_Program FT_EE_Program = (tFT_EE_Program)Marshal.GetDelegateForFunctionPointer(pFT_EE_Program, typeof(tFT_EE_Program));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232R or FT245R that we are trying to write
@@ -4507,7 +4591,7 @@ namespace FtdiCore._3rdParty
                     eedata.RIsD2XX = Convert.ToByte(ee232r.RIsD2XX);
 
                     // Call FT_EE_Program
-                    ftStatus = FT_EE_Program(ftHandle, eedata);
+                    ftStatus = FT_EE_Program(_ftHandle, eedata);
 
                     // Free unmanaged buffers
                     Marshal.FreeHGlobal(eedata.Manufacturer);
@@ -4520,7 +4604,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Program == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Program.");
+                    _logger.Info("Failed to load function FT_EE_Program.");
                 }
             }
             return ftStatus;
@@ -4546,14 +4630,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Program != IntPtr.Zero)
             {
                 tFT_EE_Program FT_EE_Program = (tFT_EE_Program)Marshal.GetDelegateForFunctionPointer(pFT_EE_Program, typeof(tFT_EE_Program));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT2232H that we are trying to write
@@ -4635,7 +4722,7 @@ namespace FtdiCore._3rdParty
                     eedata.PowerSaveEnable = Convert.ToByte(ee2232h.PowerSaveEnable);
 
                     // Call FT_EE_Program
-                    ftStatus = FT_EE_Program(ftHandle, eedata);
+                    ftStatus = FT_EE_Program(_ftHandle, eedata);
 
                     // Free unmanaged buffers
                     Marshal.FreeHGlobal(eedata.Manufacturer);
@@ -4648,7 +4735,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Program == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Program.");
+                    _logger.Info("Failed to load function FT_EE_Program.");
                 }
             }
             return ftStatus;
@@ -4674,14 +4761,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Program != IntPtr.Zero)
             {
                 tFT_EE_Program FT_EE_Program = (tFT_EE_Program)Marshal.GetDelegateForFunctionPointer(pFT_EE_Program, typeof(tFT_EE_Program));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT4232H that we are trying to write
@@ -4762,7 +4852,7 @@ namespace FtdiCore._3rdParty
                     eedata.DIsVCP8 = Convert.ToByte(ee4232h.DIsVCP);
 
                     // Call FT_EE_Program
-                    ftStatus = FT_EE_Program(ftHandle, eedata);
+                    ftStatus = FT_EE_Program(_ftHandle, eedata);
 
                     // Free unmanaged buffers
                     Marshal.FreeHGlobal(eedata.Manufacturer);
@@ -4775,7 +4865,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Program == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Program.");
+                    _logger.Info("Failed to load function FT_EE_Program.");
                 }
             }
             return ftStatus;
@@ -4801,14 +4891,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_Program != IntPtr.Zero)
             {
                 tFT_EE_Program FT_EE_Program = (tFT_EE_Program)Marshal.GetDelegateForFunctionPointer(pFT_EE_Program, typeof(tFT_EE_Program));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232H that we are trying to write
@@ -4894,7 +4987,7 @@ namespace FtdiCore._3rdParty
                     eedata.PowerSaveEnableH = Convert.ToByte(ee232h.PowerSaveEnable);
 
                     // Call FT_EE_Program
-                    ftStatus = FT_EE_Program(ftHandle, eedata);
+                    ftStatus = FT_EE_Program(_ftHandle, eedata);
 
                     // Free unmanaged buffers
                     Marshal.FreeHGlobal(eedata.Manufacturer);
@@ -4907,7 +5000,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_Program == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_Program.");
+                    _logger.Info("Failed to load function FT_EE_Program.");
                 }
             }
             return ftStatus;
@@ -4935,14 +5028,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EEPROM_Program != IntPtr.Zero) 
             {
                 tFT_EEPROM_Program FT_EEPROM_Program = (tFT_EEPROM_Program)Marshal.GetDelegateForFunctionPointer(pFT_EEPROM_Program, typeof(tFT_EEPROM_Program));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Check that it is an FT232H that we are trying to write
@@ -5047,7 +5143,7 @@ namespace FtdiCore._3rdParty
                     IntPtr eeDataMarshal = Marshal.AllocHGlobal(size);
                     Marshal.StructureToPtr(eeData, eeDataMarshal, false);
 
-                    ftStatus = FT_EEPROM_Program(ftHandle, eeDataMarshal, (uint)size, manufacturer, manufacturerID, description, serialNumber);
+                    ftStatus = FT_EEPROM_Program(_ftHandle, eeDataMarshal, (uint)size, manufacturer, manufacturerID, description, serialNumber);
                 }
             }
 
@@ -5071,7 +5167,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_EE_UASize != IntPtr.Zero) & (pFT_EE_UARead != IntPtr.Zero))
@@ -5079,18 +5178,18 @@ namespace FtdiCore._3rdParty
                 tFT_EE_UASize FT_EE_UASize = (tFT_EE_UASize)Marshal.GetDelegateForFunctionPointer(pFT_EE_UASize, typeof(tFT_EE_UASize));
                 tFT_EE_UARead FT_EE_UARead = (tFT_EE_UARead)Marshal.GetDelegateForFunctionPointer(pFT_EE_UARead, typeof(tFT_EE_UARead));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     UInt32 UASize = 0;
                     // Get size of user area to allocate an array of the correct size.
                     // The application must also get the UA size for its copy
-                    ftStatus = FT_EE_UASize(ftHandle, ref UASize);
+                    ftStatus = FT_EE_UASize(_ftHandle, ref UASize);
 
                     // Make sure we have enough storage for the whole user area
                     if (UserAreaDataBuffer.Length >= UASize)
                     {
                         // Call FT_EE_UARead
-                        ftStatus = FT_EE_UARead(ftHandle, UserAreaDataBuffer, UserAreaDataBuffer.Length, ref numBytesRead);
+                        ftStatus = FT_EE_UARead(_ftHandle, UserAreaDataBuffer, UserAreaDataBuffer.Length, ref numBytesRead);
                     }
                 }
             }
@@ -5098,11 +5197,11 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_UASize == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_UASize.");
+                    _logger.Info("Failed to load function FT_EE_UASize.");
                 }
                 if (pFT_EE_UARead == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_UARead.");
+                    _logger.Info("Failed to load function FT_EE_UARead.");
                 }
             }
             return ftStatus;
@@ -5124,7 +5223,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_EE_UASize != IntPtr.Zero) & (pFT_EE_UAWrite != IntPtr.Zero))
@@ -5132,18 +5234,18 @@ namespace FtdiCore._3rdParty
                 tFT_EE_UASize FT_EE_UASize = (tFT_EE_UASize)Marshal.GetDelegateForFunctionPointer(pFT_EE_UASize, typeof(tFT_EE_UASize));
                 tFT_EE_UAWrite FT_EE_UAWrite = (tFT_EE_UAWrite)Marshal.GetDelegateForFunctionPointer(pFT_EE_UAWrite, typeof(tFT_EE_UAWrite));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     UInt32 UASize = 0;
                     // Get size of user area to allocate an array of the correct size.
                     // The application must also get the UA size for its copy
-                    ftStatus = FT_EE_UASize(ftHandle, ref UASize);
+                    ftStatus = FT_EE_UASize(_ftHandle, ref UASize);
 
                     // Make sure we have enough storage for all the data in the EEPROM
                     if (UserAreaDataBuffer.Length <= UASize)
                     {
                         // Call FT_EE_UAWrite
-                        ftStatus = FT_EE_UAWrite(ftHandle, UserAreaDataBuffer, UserAreaDataBuffer.Length);
+                        ftStatus = FT_EE_UAWrite(_ftHandle, UserAreaDataBuffer, UserAreaDataBuffer.Length);
                     }
                 }
             }
@@ -5151,11 +5253,11 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_EE_UASize == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_UASize.");
+                    _logger.Info("Failed to load function FT_EE_UASize.");
                 }
                 if (pFT_EE_UAWrite == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_UAWrite.");
+                    _logger.Info("Failed to load function FT_EE_UAWrite.");
                 }
             }
             return ftStatus;
@@ -5177,7 +5279,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetDeviceInfo != IntPtr.Zero)
@@ -5190,17 +5295,17 @@ namespace FtdiCore._3rdParty
 
                 DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetDeviceInfo
-                    ftStatus = FT_GetDeviceInfo(ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
+                    ftStatus = FT_GetDeviceInfo(_ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
                 }
             }
             else
             {
                 if (pFT_GetDeviceInfo == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetDeviceInfo.");
+                    _logger.Info("Failed to load function FT_GetDeviceInfo.");
                 }
             }
             return ftStatus;
@@ -5222,7 +5327,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetDeviceInfo != IntPtr.Zero)
@@ -5233,17 +5341,17 @@ namespace FtdiCore._3rdParty
                 byte[] sernum = new byte[16];
                 byte[] desc = new byte[64];
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetDeviceInfo
-                    ftStatus = FT_GetDeviceInfo(ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
+                    ftStatus = FT_GetDeviceInfo(_ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
                 }
             }
             else
             {
                 if (pFT_GetDeviceInfo == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetDeviceInfo.");
+                    _logger.Info("Failed to load function FT_GetDeviceInfo.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_GetDeviceInfo.");
 #endif
@@ -5270,7 +5378,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
 
             // Check for our required function pointers being set up
@@ -5283,10 +5394,10 @@ namespace FtdiCore._3rdParty
                 byte[] sernum = new byte[16];
                 byte[] desc = new byte[64];
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetDeviceInfo
-                    ftStatus = FT_GetDeviceInfo(ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
+                    ftStatus = FT_GetDeviceInfo(_ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
                     Description = Encoding.ASCII.GetString(desc);
                     Description = Description.Substring(0, Description.IndexOf("\0"));
                 }
@@ -5295,7 +5406,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_GetDeviceInfo == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetDeviceInfo.");
+                    _logger.Info("Failed to load function FT_GetDeviceInfo.");
                 }
             }
             return ftStatus;
@@ -5319,7 +5430,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
 
             // Check for our required function pointers being set up
@@ -5332,10 +5446,10 @@ namespace FtdiCore._3rdParty
                 byte[] sernum = new byte[16];
                 byte[] desc = new byte[64];
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetDeviceInfo
-                    ftStatus = FT_GetDeviceInfo(ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
+                    ftStatus = FT_GetDeviceInfo(_ftHandle, ref DeviceType, ref DeviceID, sernum, desc, IntPtr.Zero);
                     SerialNumber = Encoding.ASCII.GetString(sernum);
                     SerialNumber = SerialNumber.Substring(0, SerialNumber.IndexOf("\0"));
                 }
@@ -5344,7 +5458,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_GetDeviceInfo == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetDeviceInfo.");
+                    _logger.Info("Failed to load function FT_GetDeviceInfo.");
                 }
             }
             return ftStatus;
@@ -5366,24 +5480,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetQueueStatus != IntPtr.Zero)
             {
                 tFT_GetQueueStatus FT_GetQueueStatus = (tFT_GetQueueStatus)Marshal.GetDelegateForFunctionPointer(pFT_GetQueueStatus, typeof(tFT_GetQueueStatus));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetQueueStatus
-                    ftStatus = FT_GetQueueStatus(ftHandle, ref RxQueue);
+                    ftStatus = FT_GetQueueStatus(_ftHandle, ref RxQueue);
                 }
             }
             else
             {
                 if (pFT_GetQueueStatus == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetQueueStatus.");
+                    _logger.Info("Failed to load function FT_GetQueueStatus.");
                 }
             }
             return ftStatus;
@@ -5405,7 +5522,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetStatus != IntPtr.Zero)
@@ -5415,17 +5535,17 @@ namespace FtdiCore._3rdParty
                 UInt32 RxQueue = 0;
                 UInt32 EventStatus = 0;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetStatus
-                    ftStatus = FT_GetStatus(ftHandle, ref RxQueue, ref TxQueue, ref EventStatus);
+                    ftStatus = FT_GetStatus(_ftHandle, ref RxQueue, ref TxQueue, ref EventStatus);
                 }
             }
             else
             {
                 if (pFT_GetStatus == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetStatus.");
+                    _logger.Info("Failed to load function FT_GetStatus.");
                 }
             }
             return ftStatus;
@@ -5447,7 +5567,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetStatus != IntPtr.Zero)
@@ -5457,17 +5580,17 @@ namespace FtdiCore._3rdParty
                 UInt32 RxQueue = 0;
                 UInt32 TxQueue = 0;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetStatus
-                    ftStatus = FT_GetStatus(ftHandle, ref RxQueue, ref TxQueue, ref EventType);
+                    ftStatus = FT_GetStatus(_ftHandle, ref RxQueue, ref TxQueue, ref EventType);
                 }
             }
             else
             {
                 if (pFT_GetStatus == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetStatus.");
+                    _logger.Info("Failed to load function FT_GetStatus.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_GetStatus.");
 #endif
@@ -5492,7 +5615,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetModemStatus != IntPtr.Zero)
@@ -5501,10 +5627,10 @@ namespace FtdiCore._3rdParty
 
                 UInt32 ModemLineStatus = 0;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetModemStatus
-                    ftStatus = FT_GetModemStatus(ftHandle, ref ModemLineStatus);
+                    ftStatus = FT_GetModemStatus(_ftHandle, ref ModemLineStatus);
 
                 }
                 ModemStatus = Convert.ToByte(ModemLineStatus & 0x000000FF);
@@ -5513,7 +5639,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_GetModemStatus == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetModemStatus.");
+                    _logger.Info("Failed to load function FT_GetModemStatus.");
                 }
             }
             return ftStatus;
@@ -5535,7 +5661,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetModemStatus != IntPtr.Zero)
@@ -5544,10 +5673,10 @@ namespace FtdiCore._3rdParty
 
                 UInt32 ModemLineStatus = 0;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetModemStatus
-                    ftStatus = FT_GetModemStatus(ftHandle, ref ModemLineStatus);
+                    ftStatus = FT_GetModemStatus(_ftHandle, ref ModemLineStatus);
                 }
                 LineStatus = Convert.ToByte((ModemLineStatus >> 8) & 0x000000FF);
             }
@@ -5555,7 +5684,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_GetModemStatus == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetModemStatus.");
+                    _logger.Info("Failed to load function FT_GetModemStatus.");
                 }
             }
             return ftStatus;
@@ -5577,24 +5706,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetBaudRate != IntPtr.Zero)
             {
                 tFT_SetBaudRate FT_SetBaudRate = (tFT_SetBaudRate)Marshal.GetDelegateForFunctionPointer(pFT_SetBaudRate, typeof(tFT_SetBaudRate));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetBaudRate
-                    ftStatus = FT_SetBaudRate(ftHandle, BaudRate);
+                    ftStatus = FT_SetBaudRate(_ftHandle, BaudRate);
                 }
             }
             else
             {
                 if (pFT_SetBaudRate == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBaudRate.");
+                    _logger.Info("Failed to load function FT_SetBaudRate.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetBaudRate.");
 #endif
@@ -5621,24 +5753,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetDataCharacteristics != IntPtr.Zero)
             {
                 tFT_SetDataCharacteristics FT_SetDataCharacteristics = (tFT_SetDataCharacteristics)Marshal.GetDelegateForFunctionPointer(pFT_SetDataCharacteristics, typeof(tFT_SetDataCharacteristics));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetDataCharacteristics
-                    ftStatus = FT_SetDataCharacteristics(ftHandle, DataBits, StopBits, Parity);
+                    ftStatus = FT_SetDataCharacteristics(_ftHandle, DataBits, StopBits, Parity);
                 }
             }
             else
             {
                 if (pFT_SetDataCharacteristics == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetDataCharacteristics.");
+                    _logger.Info("Failed to load function FT_SetDataCharacteristics.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetDataCharacteristics.");
 #endif
@@ -5665,24 +5800,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetFlowControl != IntPtr.Zero)
             {
                 tFT_SetFlowControl FT_SetFlowControl = (tFT_SetFlowControl)Marshal.GetDelegateForFunctionPointer(pFT_SetFlowControl, typeof(tFT_SetFlowControl));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetFlowControl
-                    ftStatus = FT_SetFlowControl(ftHandle, FlowControl, Xon, Xoff);
+                    ftStatus = FT_SetFlowControl(_ftHandle, FlowControl, Xon, Xoff);
                 }
             }
             else
             {
                 if (pFT_SetFlowControl == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetFlowControl.");
+                    _logger.Info("Failed to load function FT_SetFlowControl.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetFlowControl.");
 #endif
@@ -5707,7 +5845,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_SetRts != IntPtr.Zero) & (pFT_ClrRts != IntPtr.Zero))
@@ -5715,17 +5856,17 @@ namespace FtdiCore._3rdParty
                 tFT_SetRts FT_SetRts = (tFT_SetRts)Marshal.GetDelegateForFunctionPointer(pFT_SetRts, typeof(tFT_SetRts));
                 tFT_ClrRts FT_ClrRts = (tFT_ClrRts)Marshal.GetDelegateForFunctionPointer(pFT_ClrRts, typeof(tFT_ClrRts));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     if (Enable)
                     {
                         // Call FT_SetRts
-                        ftStatus = FT_SetRts(ftHandle);
+                        ftStatus = FT_SetRts(_ftHandle);
                     }
                     else
                     {
                         // Call FT_ClrRts
-                        ftStatus = FT_ClrRts(ftHandle);
+                        ftStatus = FT_ClrRts(_ftHandle);
                     }
                 }
             }
@@ -5733,14 +5874,14 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_SetRts == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetRts.");
+                    _logger.Info("Failed to load function FT_SetRts.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetRts.");
 #endif
                 }
                 if (pFT_ClrRts == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_ClrRts.");
+                    _logger.Info("Failed to load function FT_ClrRts.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_ClrRts.");
 #endif
@@ -5765,7 +5906,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_SetDtr != IntPtr.Zero) & (pFT_ClrDtr != IntPtr.Zero))
@@ -5773,17 +5917,17 @@ namespace FtdiCore._3rdParty
                 tFT_SetDtr FT_SetDtr = (tFT_SetDtr)Marshal.GetDelegateForFunctionPointer(pFT_SetDtr, typeof(tFT_SetDtr));
                 tFT_ClrDtr FT_ClrDtr = (tFT_ClrDtr)Marshal.GetDelegateForFunctionPointer(pFT_ClrDtr, typeof(tFT_ClrDtr));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     if (Enable)
                     {
                         // Call FT_SetDtr
-                        ftStatus = FT_SetDtr(ftHandle);
+                        ftStatus = FT_SetDtr(_ftHandle);
                     }
                     else
                     {
                         // Call FT_ClrDtr
-                        ftStatus = FT_ClrDtr(ftHandle);
+                        ftStatus = FT_ClrDtr(_ftHandle);
                     }
                 }
             }
@@ -5791,14 +5935,14 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_SetDtr == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetDtr.");
+                    _logger.Info("Failed to load function FT_SetDtr.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetDtr.");
 #endif
                 }
                 if (pFT_ClrDtr == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_ClrDtr.");
+                    _logger.Info("Failed to load function FT_ClrDtr.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_ClrDtr.");
 #endif
@@ -5824,24 +5968,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetTimeouts != IntPtr.Zero)
             {
                 tFT_SetTimeouts FT_SetTimeouts = (tFT_SetTimeouts)Marshal.GetDelegateForFunctionPointer(pFT_SetTimeouts, typeof(tFT_SetTimeouts));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetTimeouts
-                    ftStatus = FT_SetTimeouts(ftHandle, ReadTimeout, WriteTimeout);
+                    ftStatus = FT_SetTimeouts(_ftHandle, ReadTimeout, WriteTimeout);
                 }
             }
             else
             {
                 if (pFT_SetTimeouts == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetTimeouts.");
+                    _logger.Info("Failed to load function FT_SetTimeouts.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetTimeouts.");
 #endif
@@ -5866,7 +6013,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if ((pFT_SetBreakOn != IntPtr.Zero) & (pFT_SetBreakOff != IntPtr.Zero))
@@ -5874,17 +6024,17 @@ namespace FtdiCore._3rdParty
                 tFT_SetBreakOn FT_SetBreakOn = (tFT_SetBreakOn)Marshal.GetDelegateForFunctionPointer(pFT_SetBreakOn, typeof(tFT_SetBreakOn));
                 tFT_SetBreakOff FT_SetBreakOff = (tFT_SetBreakOff)Marshal.GetDelegateForFunctionPointer(pFT_SetBreakOff, typeof(tFT_SetBreakOff));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     if (Enable)
                     {
                         // Call FT_SetBreakOn
-                        ftStatus = FT_SetBreakOn(ftHandle);
+                        ftStatus = FT_SetBreakOn(_ftHandle);
                     }
                     else
                     {
                         // Call FT_SetBreakOff
-                        ftStatus = FT_SetBreakOff(ftHandle);
+                        ftStatus = FT_SetBreakOff(_ftHandle);
                     }
                 }
             }
@@ -5892,14 +6042,14 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_SetBreakOn == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBreakOn.");
+                    _logger.Info("Failed to load function FT_SetBreakOn.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetBreakOn.");
 #endif
                 }
                 if (pFT_SetBreakOff == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetBreakOff.");
+                    _logger.Info("Failed to load function FT_SetBreakOff.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetBreakOff.");
 #endif
@@ -5925,24 +6075,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetResetPipeRetryCount != IntPtr.Zero)
             {
                 tFT_SetResetPipeRetryCount FT_SetResetPipeRetryCount = (tFT_SetResetPipeRetryCount)Marshal.GetDelegateForFunctionPointer(pFT_SetResetPipeRetryCount, typeof(tFT_SetResetPipeRetryCount));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetResetPipeRetryCount
-                    ftStatus = FT_SetResetPipeRetryCount(ftHandle, ResetPipeRetryCount);
+                    ftStatus = FT_SetResetPipeRetryCount(_ftHandle, ResetPipeRetryCount);
                 }
             }
             else
             {
                 if (pFT_SetResetPipeRetryCount == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetResetPipeRetryCount.");
+                    _logger.Info("Failed to load function FT_SetResetPipeRetryCount.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetResetPipeRetryCount.");
 #endif
@@ -5967,24 +6120,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetDriverVersion != IntPtr.Zero)
             {
                 tFT_GetDriverVersion FT_GetDriverVersion = (tFT_GetDriverVersion)Marshal.GetDelegateForFunctionPointer(pFT_GetDriverVersion, typeof(tFT_GetDriverVersion));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetDriverVersion
-                    ftStatus = FT_GetDriverVersion(ftHandle, ref DriverVersion);
+                    ftStatus = FT_GetDriverVersion(_ftHandle, ref DriverVersion);
                 }
             }
             else
             {
                 if (pFT_GetDriverVersion == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetDriverVersion.");
+                    _logger.Info("Failed to load function FT_GetDriverVersion.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_GetDriverVersion.");
 #endif
@@ -6009,7 +6165,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetLibraryVersion != IntPtr.Zero)
@@ -6023,7 +6182,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_GetLibraryVersion == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetLibraryVersion.");
+                    _logger.Info("Failed to load function FT_GetLibraryVersion.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_GetLibraryVersion.");
 #endif
@@ -6048,24 +6207,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetDeadmanTimeout != IntPtr.Zero)
             {
                 tFT_SetDeadmanTimeout FT_SetDeadmanTimeout = (tFT_SetDeadmanTimeout)Marshal.GetDelegateForFunctionPointer(pFT_SetDeadmanTimeout, typeof(tFT_SetDeadmanTimeout));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetDeadmanTimeout
-                    ftStatus = FT_SetDeadmanTimeout(ftHandle, DeadmanTimeout);
+                    ftStatus = FT_SetDeadmanTimeout(_ftHandle, DeadmanTimeout);
                 }
             }
             else
             {
                 if (pFT_SetDeadmanTimeout == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetDeadmanTimeout.");
+                    _logger.Info("Failed to load function FT_SetDeadmanTimeout.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetDeadmanTimeout.");
 #endif
@@ -6092,14 +6254,17 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetLatencyTimer != IntPtr.Zero)
             {
                 tFT_SetLatencyTimer FT_SetLatencyTimer = (tFT_SetLatencyTimer)Marshal.GetDelegateForFunctionPointer(pFT_SetLatencyTimer, typeof(tFT_SetLatencyTimer));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     FT_DEVICE DeviceType = FT_DEVICE.FT_DEVICE_UNKNOWN;
                     // Set Bit Mode does not apply to FT8U232AM, FT8U245AM or FT8U100AX devices
@@ -6113,14 +6278,14 @@ namespace FtdiCore._3rdParty
                     }
 
                     // Call FT_SetLatencyTimer
-                    ftStatus = FT_SetLatencyTimer(ftHandle, Latency);
+                    ftStatus = FT_SetLatencyTimer(_ftHandle, Latency);
                 }
             }
             else
             {
                 if (pFT_SetLatencyTimer == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetLatencyTimer.");
+                    _logger.Info("Failed to load function FT_SetLatencyTimer.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetLatencyTimer.");
 #endif
@@ -6145,24 +6310,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetLatencyTimer != IntPtr.Zero)
             {
                 tFT_GetLatencyTimer FT_GetLatencyTimer = (tFT_GetLatencyTimer)Marshal.GetDelegateForFunctionPointer(pFT_GetLatencyTimer, typeof(tFT_GetLatencyTimer));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetLatencyTimer
-                    ftStatus = FT_GetLatencyTimer(ftHandle, ref Latency);
+                    ftStatus = FT_GetLatencyTimer(_ftHandle, ref Latency);
                 }
             }
             else
             {
                 if (pFT_GetLatencyTimer == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetLatencyTimer.");
+                    _logger.Info("Failed to load function FT_GetLatencyTimer.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_GetLatencyTimer.");
 #endif
@@ -6189,7 +6357,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetUSBParameters != IntPtr.Zero)
@@ -6198,17 +6369,17 @@ namespace FtdiCore._3rdParty
 
                 UInt32 OutTransferSize = InTransferSize;
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetUSBParameters
-                    ftStatus = FT_SetUSBParameters(ftHandle, InTransferSize, OutTransferSize);
+                    ftStatus = FT_SetUSBParameters(_ftHandle, InTransferSize, OutTransferSize);
                 }
             }
             else
             {
                 if (pFT_SetUSBParameters == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetUSBParameters.");
+                    _logger.Info("Failed to load function FT_SetUSBParameters.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetUSBParameters.");
 #endif
@@ -6236,24 +6407,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_SetChars != IntPtr.Zero)
             {
                 tFT_SetChars FT_SetChars = (tFT_SetChars)Marshal.GetDelegateForFunctionPointer(pFT_SetChars, typeof(tFT_SetChars));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_SetChars
-                    ftStatus = FT_SetChars(ftHandle, EventChar, Convert.ToByte(EventCharEnable), ErrorChar, Convert.ToByte(ErrorCharEnable));
+                    ftStatus = FT_SetChars(_ftHandle, EventChar, Convert.ToByte(EventCharEnable), ErrorChar, Convert.ToByte(ErrorCharEnable));
                 }
             }
             else
             {
                 if (pFT_SetChars == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_SetChars.");
+                    _logger.Info("Failed to load function FT_SetChars.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_SetChars.");
 #endif
@@ -6278,23 +6452,26 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_EE_UASize != IntPtr.Zero)
             {
                 tFT_EE_UASize FT_EE_UASize = (tFT_EE_UASize)Marshal.GetDelegateForFunctionPointer(pFT_EE_UASize, typeof(tFT_EE_UASize));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
-                    ftStatus = FT_EE_UASize(ftHandle, ref UASize);
+                    ftStatus = FT_EE_UASize(_ftHandle, ref UASize);
                 }
             }
             else
             {
                 if (pFT_EE_UASize == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_EE_UASize.");
+                    _logger.Info("Failed to load function FT_EE_UASize.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_EE_UASize.");
 #endif
@@ -6322,7 +6499,10 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_GetComPortNumber != IntPtr.Zero)
@@ -6330,10 +6510,10 @@ namespace FtdiCore._3rdParty
                 tFT_GetComPortNumber FT_GetComPortNumber = (tFT_GetComPortNumber)Marshal.GetDelegateForFunctionPointer(pFT_GetComPortNumber, typeof(tFT_GetComPortNumber));
 
                 Int32 ComPortNumber = -1;
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_GetComPortNumber
-                    ftStatus = FT_GetComPortNumber(ftHandle, ref ComPortNumber);
+                    ftStatus = FT_GetComPortNumber(_ftHandle, ref ComPortNumber);
                 }
 
                 if (ComPortNumber == -1)
@@ -6352,7 +6532,7 @@ namespace FtdiCore._3rdParty
             {
                 if (pFT_GetComPortNumber == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_GetComPortNumber.");
+                    _logger.Info("Failed to load function FT_GetComPortNumber.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_GetComPortNumber.");
 #endif
@@ -6377,24 +6557,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_VendorCmdGet != IntPtr.Zero)
             {
                 tFT_VendorCmdGet FT_VendorCmdGet = (tFT_VendorCmdGet)Marshal.GetDelegateForFunctionPointer(pFT_VendorCmdGet, typeof(tFT_VendorCmdGet));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_VendorCmdGet
-                    ftStatus = FT_VendorCmdGet(ftHandle, request, buf, len);
+                    ftStatus = FT_VendorCmdGet(_ftHandle, request, buf, len);
                 }
             }
             else
             {
                 if (pFT_VendorCmdGet == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_VendorCmdGet.");
+                    _logger.Info("Failed to load function FT_VendorCmdGet.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_VendorCmdGet.");
 #endif
@@ -6418,24 +6601,27 @@ namespace FtdiCore._3rdParty
 
             // If the DLL hasn't been loaded, just return here
             if (hFTD2XXDLL == IntPtr.Zero)
+            {
+                _logger.Info("Device Handle Not Set");
                 return ftStatus;
+            }
 
             // Check for our required function pointers being set up
             if (pFT_VendorCmdSet != IntPtr.Zero)
             {
                 tFT_VendorCmdSet FT_VendorCmdSet = (tFT_VendorCmdSet)Marshal.GetDelegateForFunctionPointer(pFT_VendorCmdSet, typeof(tFT_VendorCmdSet));
 
-                if (ftHandle != IntPtr.Zero)
+                if (_ftHandle != IntPtr.Zero)
                 {
                     // Call FT_VendorCmdSet
-                    ftStatus = FT_VendorCmdSet(ftHandle, request, buf, len);
+                    ftStatus = FT_VendorCmdSet(_ftHandle, request, buf, len);
                 }
             }
             else
             {
                 if (pFT_VendorCmdSet == IntPtr.Zero)
                 {
-                    Console.WriteLine("Failed to load function FT_VendorCmdSet.");
+                    _logger.Info("Failed to load function FT_VendorCmdSet.");
 #if DEBUG
                     //MessageBox.Show("Failed to load function FT_VendorCmdSet.");
 #endif
@@ -6457,7 +6643,7 @@ namespace FtdiCore._3rdParty
         {
             get
             {
-                if (ftHandle == IntPtr.Zero)
+                if (_ftHandle == IntPtr.Zero)
                     return false;
                 else
                     return true;
