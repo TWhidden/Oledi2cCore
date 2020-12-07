@@ -15,7 +15,7 @@ namespace FtdiCore
 
         private readonly Timer _autoReconnectTimer = new Timer();
         private readonly byte[] _byteDataRead = new byte[15]; // Array for storing the data which was read from the I2C Slave
-        private FTDI _ftdiDevice = null;
+        private FTDI _ftdiDevice;
         private readonly byte _gpioDMask;
         private readonly byte[] _inputBuffer = new byte[2048]; // Buffer to hold Data bytes read from FT232H
         private readonly ILogger _logger;
@@ -52,9 +52,10 @@ namespace FtdiCore
         /// <param name="deviceIndex"></param>
         /// <param name="logger"></param>
         /// <param name="gpioMask"></param>
-        public FtdiI2cCore(uint deviceIndex, ILogger logger, byte gpioDMask = 0)
+        public FtdiI2cCore(uint deviceIndex, ILogger logger, byte gpioMask = 0)
         {
             _logger = logger;
+            _ftdiDevice = new FTDI(_logger);
 
             // Create the backing API object
             CreateDevice();
@@ -62,10 +63,10 @@ namespace FtdiCore
             var maskExcludingReservedDPins = 0x1F;
             var maskIncludingDefaultDPins = 0xC0;
 
-            gpioDMask = (byte) (gpioDMask & maskExcludingReservedDPins);
-            gpioDMask = (byte) (gpioDMask | maskIncludingDefaultDPins);
+            gpioMask = (byte) (gpioMask & maskExcludingReservedDPins);
+            gpioMask = (byte) (gpioMask | maskIncludingDefaultDPins);
 
-            _gpioDMask = gpioDMask;
+            _gpioDMask = gpioMask;
 
             DeviceIndex = deviceIndex;
         }
@@ -116,7 +117,7 @@ namespace FtdiCore
             _autoReconnectTimer?.Stop();
         }
 
-        public event EventHandler<bool> FtdiInitializeStateChanged;
+        public event EventHandler<bool>? FtdiInitializeStateChanged;
 
         public bool Ready
         {
@@ -175,7 +176,7 @@ namespace FtdiCore
                 // This command then tells the MPSSE to send any results gathered back immediately
                 _outputBuffer[dwNumBytesToSend++] = 0x87; // Send answer back immediate command
 
-                var ftStatus = _ftdiDevice.Write(_outputBuffer, dwNumBytesToSend,
+                var ftStatus = _ftdiDevice?.Write(_outputBuffer, dwNumBytesToSend,
                     ref dwNumBytesSent); // Send off the commands to the FT232H
 
                 // ===============================================================
@@ -186,7 +187,7 @@ namespace FtdiCore
                 var readTimeoutCounter = 0;
 
                 ftStatus =
-                    _ftdiDevice.GetRxBytesAvailable(ref dwNumInputBuffer); // Get number of bytes in the input buffer
+                    _ftdiDevice?.GetRxBytesAvailable(ref dwNumInputBuffer); // Get number of bytes in the input buffer
 
                 while (dwNumInputBuffer < 1 && ftStatus == FTDI.FT_STATUS.FT_OK && readTimeoutCounter < 500)
                 {
@@ -195,7 +196,7 @@ namespace FtdiCore
                     // or (2) a hardware error occurs causing the GetQueueStatus to return an error code
                     // or (3) we have checked 500 times and the expected byte is not coming 
                     ftStatus =
-                        _ftdiDevice.GetRxBytesAvailable(
+                        _ftdiDevice?.GetRxBytesAvailable(
                             ref dwNumInputBuffer); // Get number of bytes in the input buffer
                     readTimeoutCounter++;
                 }
@@ -204,7 +205,7 @@ namespace FtdiCore
                 // then read the byte available and return True to indicate success
                 if (ftStatus == FTDI.FT_STATUS.FT_OK && readTimeoutCounter < 500)
                 {
-                    ftStatus = _ftdiDevice.Read(_inputBuffer, dwNumInputBuffer,
+                    ftStatus = _ftdiDevice?.Read(_inputBuffer, dwNumInputBuffer,
                         ref dwNumBytesRead); // Now read the data
                     _byteDataRead[0] = _inputBuffer[0]; // return the data read in the global array ByteDataRead
                     return true; // Indicate success
@@ -1029,18 +1030,18 @@ namespace FtdiCore
             InitReconnectImpl();
         }
 
-        public bool GetDeviceByLocationId(uint locationId, out FtdiDevice device)
+        public bool GetDeviceByLocationId(uint locationId, out FtdiDevice? device)
         {
             lock (_functionLock)
             {
                 // Init object
                 device = null;
 
-                if (_ftdiDevice.GetDeviceList(_nodeBuffer) == FTDI.FT_STATUS.FT_OK)
+                if (_ftdiDevice?.GetDeviceList(_nodeBuffer) == FTDI.FT_STATUS.FT_OK)
                 {
                     foreach (var deviceInfoNode in _nodeBuffer)
                     {
-                        if (deviceInfoNode == null) continue;
+                        //if (deviceInfoNode == null) continue;
                         if (deviceInfoNode.LocId == locationId) device = new FtdiDevice(deviceInfoNode);
                     }
 
@@ -1054,17 +1055,17 @@ namespace FtdiCore
         }
 
 
-        public bool GetDeviceByIndex(uint deviceIndex, out FtdiDevice device)
+        public bool GetDeviceByIndex(uint deviceIndex, out FtdiDevice? device)
         {
             lock (_functionLock)
             {
                 // Init object
                 device = null;
 
-                if (_ftdiDevice.GetDeviceList(_nodeBuffer) == FTDI.FT_STATUS.FT_OK)
+                if (_ftdiDevice?.GetDeviceList(_nodeBuffer) == FTDI.FT_STATUS.FT_OK)
                 {
                     var i = _nodeBuffer[deviceIndex];
-                    if (i != null) device = new FtdiDevice(i);
+                    device = new FtdiDevice(i);
 
                     // FTDI responded
                     return true;

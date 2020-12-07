@@ -62,7 +62,7 @@ namespace GpioI2cCore
             }
         }
 
-        public event EventHandler<GpioPressState> PressState;
+        public event EventHandler<GpioPressState>? PressState;
 
 
         protected virtual void OnPressState(GpioPressState e)

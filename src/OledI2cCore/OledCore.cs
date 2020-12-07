@@ -112,7 +112,7 @@ namespace OledI2cCore
         /// <summary>
         ///     Logger Reference
         /// </summary>
-        private readonly IOledLogger _logger;
+        private readonly IOledLogger? _logger;
 
         /// <summary>
         ///     The buffer that holds the bytes that match the OLED.
@@ -150,7 +150,7 @@ namespace OledI2cCore
         }
 
         public OledCore(II2C wire, byte width = 128, byte height = 32, byte address = 0x3C, byte lineSpacing = 1,
-            byte letterSpacing = 1, IOledLogger logger = null, ScreenDriver screenDriver = ScreenDriver.SSD1306)
+            byte letterSpacing = 1, IOledLogger? logger = null, ScreenDriver screenDriver = ScreenDriver.SSD1306)
         {
             _wire = wire;
             Height = height;
@@ -189,7 +189,7 @@ namespace OledI2cCore
 
         }
 
-        private void _wire_ReadyStateChanged(object sender, bool e)
+        private void _wire_ReadyStateChanged(object? sender, bool e)
         {
             if (e)
             {

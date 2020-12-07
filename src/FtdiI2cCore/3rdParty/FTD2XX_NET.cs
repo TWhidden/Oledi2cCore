@@ -71,6 +71,7 @@ namespace FtdiCore._3rdParty
 
         private void FindFunctionPointers()
         {
+            if(_nativeLibrary == null) return;
             // Set up our function pointers for use through our exported methods
             pFT_CreateDeviceInfoList = _nativeLibrary.LoadFunction("FT_CreateDeviceInfoList");
             pFT_GetDeviceInfoDetail = _nativeLibrary.LoadFunction("FT_GetDeviceInfoDetail");
@@ -140,7 +141,7 @@ namespace FtdiCore._3rdParty
 
         #region LOAD_LIBRARIES
 
-        private static NativeLibraryLoader.NativeLibrary _nativeLibrary;
+        private static NativeLibraryLoader.NativeLibrary? _nativeLibrary = null;
 
         #endregion
 
@@ -935,11 +936,11 @@ namespace FtdiCore._3rdParty
             /// <summary>
             /// The device serial number
             /// </summary>
-            public string SerialNumber;
+            public string SerialNumber = string.Empty;
             /// <summary>
             /// The device description
             /// </summary>
-            public string Description;
+            public string Description = string.Empty;
             /// <summary>
             /// The device handle.  This value is not used externally and is provided for information only.
             /// If the device is not open, this value is 0.
@@ -1177,19 +1178,19 @@ namespace FtdiCore._3rdParty
             /// <summary>
             /// Manufacturer name string
             /// </summary>
-            public string Manufacturer = "FTDI";
+            public string? Manufacturer = "FTDI";
             /// <summary>
             /// Manufacturer name abbreviation to be used as a prefix for automatically generated serial numbers
             /// </summary>
-            public string ManufacturerID = "FT";
+            public string? ManufacturerID = "FT";
             /// <summary>
             /// Device description string
             /// </summary>
-            public string Description = "USB-Serial Converter";
+            public string? Description = "USB-Serial Converter";
             /// <summary>
             /// Device serial number string
             /// </summary>
-            public string SerialNumber = "";
+            public string? SerialNumber = "";
             /// <summary>
             /// Maximum power the device needs
             /// </summary>
@@ -2090,7 +2091,7 @@ namespace FtdiCore._3rdParty
             // Clear the device list
             for (var i = 0; i < devicelist.Length; i++)
             {
-                devicelist[i] = null;
+                devicelist[i] = null!;
             }
 
             // Check for our required function pointers being set up
@@ -4307,13 +4308,13 @@ namespace FtdiCore._3rdParty
 
                     // Check lengths of strings to make sure that they are within our limits
                     // If not, trim them to make them our maximum length
-                    if (ee232b.Manufacturer.Length > 32)
+                    if (ee232b.Manufacturer?.Length > 32)
                         ee232b.Manufacturer = ee232b.Manufacturer.Substring(0, 32);
-                    if (ee232b.ManufacturerID.Length > 16)
+                    if (ee232b.ManufacturerID?.Length > 16)
                         ee232b.ManufacturerID = ee232b.ManufacturerID.Substring(0, 16);
-                    if (ee232b.Description.Length > 64)
+                    if (ee232b.Description?.Length > 64)
                         ee232b.Description = ee232b.Description.Substring(0, 64);
-                    if (ee232b.SerialNumber.Length > 16)
+                    if (ee232b.SerialNumber?.Length > 16)
                         ee232b.SerialNumber = ee232b.SerialNumber.Substring(0, 16);
 
                     // Set string values
@@ -4420,13 +4421,13 @@ namespace FtdiCore._3rdParty
 
                     // Check lengths of strings to make sure that they are within our limits
                     // If not, trim them to make them our maximum length
-                    if (ee2232.Manufacturer.Length > 32)
+                    if (ee2232.Manufacturer?.Length > 32)
                         ee2232.Manufacturer = ee2232.Manufacturer.Substring(0, 32);
-                    if (ee2232.ManufacturerID.Length > 16)
+                    if (ee2232.ManufacturerID?.Length > 16)
                         ee2232.ManufacturerID = ee2232.ManufacturerID.Substring(0, 16);
-                    if (ee2232.Description.Length > 64)
+                    if (ee2232.Description?.Length > 64)
                         ee2232.Description = ee2232.Description.Substring(0, 64);
-                    if (ee2232.SerialNumber.Length > 16)
+                    if (ee2232.SerialNumber?.Length > 16)
                         ee2232.SerialNumber = ee2232.SerialNumber.Substring(0, 16);
 
                     // Set string values
@@ -4543,13 +4544,13 @@ namespace FtdiCore._3rdParty
 
                     // Check lengths of strings to make sure that they are within our limits
                     // If not, trim them to make them our maximum length
-                    if (ee232r.Manufacturer.Length > 32)
+                    if (ee232r.Manufacturer?.Length > 32)
                         ee232r.Manufacturer = ee232r.Manufacturer.Substring(0, 32);
-                    if (ee232r.ManufacturerID.Length > 16)
+                    if (ee232r.ManufacturerID?.Length > 16)
                         ee232r.ManufacturerID = ee232r.ManufacturerID.Substring(0, 16);
-                    if (ee232r.Description.Length > 64)
+                    if (ee232r.Description?.Length > 64)
                         ee232r.Description = ee232r.Description.Substring(0, 64);
-                    if (ee232r.SerialNumber.Length > 16)
+                    if (ee232r.SerialNumber?.Length > 16)
                         ee232r.SerialNumber = ee232r.SerialNumber.Substring(0, 16);
 
                     // Set string values
@@ -4674,13 +4675,13 @@ namespace FtdiCore._3rdParty
 
                     // Check lengths of strings to make sure that they are within our limits
                     // If not, trim them to make them our maximum length
-                    if (ee2232h.Manufacturer.Length > 32)
+                    if (ee2232h.Manufacturer?.Length > 32)
                         ee2232h.Manufacturer = ee2232h.Manufacturer.Substring(0, 32);
-                    if (ee2232h.ManufacturerID.Length > 16)
+                    if (ee2232h.ManufacturerID?.Length > 16)
                         ee2232h.ManufacturerID = ee2232h.ManufacturerID.Substring(0, 16);
-                    if (ee2232h.Description.Length > 64)
+                    if (ee2232h.Description?.Length > 64)
                         ee2232h.Description = ee2232h.Description.Substring(0, 64);
-                    if (ee2232h.SerialNumber.Length > 16)
+                    if (ee2232h.SerialNumber?.Length > 16)
                         ee2232h.SerialNumber = ee2232h.SerialNumber.Substring(0, 16);
 
                     // Set string values
@@ -4805,13 +4806,13 @@ namespace FtdiCore._3rdParty
 
                     // Check lengths of strings to make sure that they are within our limits
                     // If not, trim them to make them our maximum length
-                    if (ee4232h.Manufacturer.Length > 32)
+                    if (ee4232h.Manufacturer?.Length > 32)
                         ee4232h.Manufacturer = ee4232h.Manufacturer.Substring(0, 32);
-                    if (ee4232h.ManufacturerID.Length > 16)
+                    if (ee4232h.ManufacturerID?.Length > 16)
                         ee4232h.ManufacturerID = ee4232h.ManufacturerID.Substring(0, 16);
-                    if (ee4232h.Description.Length > 64)
+                    if (ee4232h.Description?.Length > 64)
                         ee4232h.Description = ee4232h.Description.Substring(0, 64);
-                    if (ee4232h.SerialNumber.Length > 16)
+                    if (ee4232h.SerialNumber?.Length > 16)
                         ee4232h.SerialNumber = ee4232h.SerialNumber.Substring(0, 16);
 
                     // Set string values
@@ -4935,13 +4936,13 @@ namespace FtdiCore._3rdParty
 
                     // Check lengths of strings to make sure that they are within our limits
                     // If not, trim them to make them our maximum length
-                    if (ee232h.Manufacturer.Length > 32)
+                    if (ee232h.Manufacturer?.Length > 32)
                         ee232h.Manufacturer = ee232h.Manufacturer.Substring(0, 32);
-                    if (ee232h.ManufacturerID.Length > 16)
+                    if (ee232h.ManufacturerID?.Length > 16)
                         ee232h.ManufacturerID = ee232h.ManufacturerID.Substring(0, 16);
-                    if (ee232h.Description.Length > 64)
+                    if (ee232h.Description?.Length > 64)
                         ee232h.Description = ee232h.Description.Substring(0, 64);
-                    if (ee232h.SerialNumber.Length > 16)
+                    if (ee232h.SerialNumber?.Length > 16)
                         ee232h.SerialNumber = ee232h.SerialNumber.Substring(0, 16);
 
                     // Set string values
@@ -5068,21 +5069,21 @@ namespace FtdiCore._3rdParty
 
                     // Check lengths of strings to make sure that they are within our limits
                     // If not, trim them to make them our maximum length
-                    if (eeX.Manufacturer.Length > 32)
+                    if (eeX.Manufacturer?.Length > 32)
                         eeX.Manufacturer = eeX.Manufacturer.Substring(0, 32);
-                    if (eeX.ManufacturerID.Length > 16)
+                    if (eeX.ManufacturerID?.Length > 16)
                         eeX.ManufacturerID = eeX.ManufacturerID.Substring(0, 16);
-                    if (eeX.Description.Length > 64)
+                    if (eeX.Description?.Length > 64)
                         eeX.Description = eeX.Description.Substring(0, 64);
-                    if (eeX.SerialNumber.Length > 16)
+                    if (eeX.SerialNumber?.Length > 16)
                         eeX.SerialNumber = eeX.SerialNumber.Substring(0, 16);
 
                     // Set string values
                     System.Text.UTF8Encoding encoding = new System.Text.UTF8Encoding();
-                    manufacturer = encoding.GetBytes(eeX.Manufacturer);
-                    manufacturerID = encoding.GetBytes(eeX.ManufacturerID);
-                    description = encoding.GetBytes(eeX.Description);
-                    serialNumber = encoding.GetBytes(eeX.SerialNumber);
+                    manufacturer = encoding.GetBytes(eeX.Manufacturer ?? string.Empty);
+                    manufacturerID = encoding.GetBytes(eeX.ManufacturerID ?? string.Empty);
+                    description = encoding.GetBytes(eeX.Description ?? string.Empty);
+                    serialNumber = encoding.GetBytes(eeX.SerialNumber ?? string.Empty);
 
                     // Map non-string elements to structure to be returned
                     // Standard elements

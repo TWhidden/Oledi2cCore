@@ -45,14 +45,14 @@ namespace NativeLibraryLoader
                 yield return Path.Combine(AppContext.BaseDirectory, name);
             }
             yield return name;
-            if (TryLocateNativeAssetFromDeps(name, out string appLocalNativePath, out string depsResolvedPath))
+            if (TryLocateNativeAssetFromDeps(name, out string? appLocalNativePath, out string? depsResolvedPath))
             {
-                yield return appLocalNativePath;
-                yield return depsResolvedPath;
+                yield return appLocalNativePath!;
+                yield return depsResolvedPath!;
             }
         }
 
-        private bool TryLocateNativeAssetFromDeps(string name, out string appLocalNativePath, out string depsResolvedPath)
+        private bool TryLocateNativeAssetFromDeps(string name, out string? appLocalNativePath, out string? depsResolvedPath)
         {
             DependencyContext defaultContext = DependencyContext.Default;
             if (defaultContext == null)
@@ -62,16 +62,16 @@ namespace NativeLibraryLoader
                 return false;
             }
 
-            string currentRID = Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment.GetRuntimeIdentifier();
+            string currentRid = Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment.GetRuntimeIdentifier();
             List<string> allRIDs = new List<string>();
-            allRIDs.Add(currentRID);
-            if (!AddFallbacks(allRIDs, currentRID, defaultContext.RuntimeGraph))
+            allRIDs.Add(currentRid );
+            if (!AddFallbacks(allRIDs, currentRid , defaultContext.RuntimeGraph))
             {
-                string guessedFallbackRID = GuessFallbackRID(currentRID);
-                if (guessedFallbackRID != null)
+                var guessedFallbackRid = GuessFallbackRID(currentRid );
+                if (guessedFallbackRid != null)
                 {
-                    allRIDs.Add(guessedFallbackRID);
-                    AddFallbacks(allRIDs, guessedFallbackRID, defaultContext.RuntimeGraph);
+                    allRIDs.Add(guessedFallbackRid);
+                    AddFallbacks(allRIDs, guessedFallbackRid, defaultContext.RuntimeGraph);
                 }
             }
 
@@ -106,7 +106,7 @@ namespace NativeLibraryLoader
             return false;
         }
 
-        private string GuessFallbackRID(string actualRuntimeIdentifier)
+        private string? GuessFallbackRID(string actualRuntimeIdentifier)
         {
             if (actualRuntimeIdentifier == "osx.10.13-x64")
             {
@@ -144,11 +144,11 @@ namespace NativeLibraryLoader
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                return Environment.GetEnvironmentVariable("USERPROFILE");
+                return Environment.GetEnvironmentVariable("USERPROFILE") ?? string.Empty;
             }
             else
             {
-                return Environment.GetEnvironmentVariable("HOME");
+                return Environment.GetEnvironmentVariable("HOME") ?? string.Empty;
             }
         }
     }
