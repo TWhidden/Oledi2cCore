@@ -4173,7 +4173,9 @@ namespace FtdiCore._3rdParty
                     if (ftStatus == FT_STATUS.FT_OK)
                     {
                         // Get the data back from the pointer...
+#pragma warning disable CS8605 // Unboxing a possibly null value.
                         eeData = (FT_XSERIES_DATA)Marshal.PtrToStructure(eeDataMarshal, typeof(FT_XSERIES_DATA));
+#pragma warning restore CS8605 // Unboxing a possibly null value.
 
                         // Retrieve string values
                         System.Text.UTF8Encoding enc = new System.Text.UTF8Encoding();

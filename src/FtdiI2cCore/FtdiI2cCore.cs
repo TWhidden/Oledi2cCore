@@ -1041,7 +1041,7 @@ namespace FtdiCore
                 {
                     foreach (var deviceInfoNode in _nodeBuffer)
                     {
-                        //if (deviceInfoNode == null) continue;
+                        if (deviceInfoNode == null!) continue;
                         if (deviceInfoNode.LocId == locationId) device = new FtdiDevice(deviceInfoNode);
                     }
 
@@ -1065,6 +1065,7 @@ namespace FtdiCore
                 if (_ftdiDevice?.GetDeviceList(_nodeBuffer) == FTDI.FT_STATUS.FT_OK)
                 {
                     var i = _nodeBuffer[deviceIndex];
+                    if (i == null!) return false;
                     device = new FtdiDevice(i);
 
                     // FTDI responded
