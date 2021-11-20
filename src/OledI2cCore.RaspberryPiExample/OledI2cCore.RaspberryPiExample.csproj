@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	  <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Unosquare.Raspberry.IO" Version="0.27.1" />
+    <PackageReference Include="Unosquare.WiringPi" Version="0.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GpioI2cCore\GpioI2cCore.csproj" />
+    <ProjectReference Include="..\OledI2cCore\OledI2cCore.csproj" />
+  </ItemGroup>
+
+</Project>

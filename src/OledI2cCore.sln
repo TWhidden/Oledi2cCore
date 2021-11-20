@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.29215.179
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FtdiCore", "FtdiI2cCore\FtdiCore.csproj", "{2F1E1186-457D-4EE6-A65D-220D73F1BE45}"
 EndProject
@@ -13,7 +13,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GpioI2cCoreTests", "GpioI2c
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GpioI2cCore", "GpioI2cCore\GpioI2cCore.csproj", "{0CCB360B-B09D-4EFA-86F7-25DDB1CC11D6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FtdiCore.Tests", "FtdiCore.Tests\FtdiCore.Tests.csproj", "{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FtdiCore.Tests", "FtdiCore.Tests\FtdiCore.Tests.csproj", "{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OledI2cCore.RaspberryPiExample", "OledI2cCore.RaspberryPiExample\OledI2cCore.RaspberryPiExample.csproj", "{ACE8F357-5061-41AE-A0BD-8906EAF1D0C7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,6 +47,10 @@ Global
 		{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A2A434BE-F1E2-4D55-9B96-D115A9B727E0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ACE8F357-5061-41AE-A0BD-8906EAF1D0C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ACE8F357-5061-41AE-A0BD-8906EAF1D0C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ACE8F357-5061-41AE-A0BD-8906EAF1D0C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ACE8F357-5061-41AE-A0BD-8906EAF1D0C7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
