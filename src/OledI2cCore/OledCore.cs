@@ -59,6 +59,11 @@ namespace OledI2cCore
         private readonly List<Func<bool>> _initActions = new List<Func<bool>>();
 
         /// <summary>
+        /// As much as I hate locks, there is a potential issue with updating the hashset, while another operation is writing to it.
+        /// </summary>
+        private readonly object _screenUpdateLock = new object();
+
+        /// <summary>
         ///     Command lookup for Debugging
         /// </summary>
         private static readonly Dictionary<byte, string> CommandLookup = new Dictionary<byte, string>(
@@ -543,7 +548,11 @@ namespace OledI2cCore
 
             if (changeDetected)
             {
-                if (!_dirtyBytes.Contains(index)) _dirtyBytes.Add(index);
+                lock (_screenUpdateLock)
+                {
+                    if (!_dirtyBytes.Contains(index)) _dirtyBytes.Add(index);
+                }
+
                 if (sync) UpdateDirtyBytes();
             }
         }
@@ -582,7 +591,10 @@ namespace OledI2cCore
                 if (color > 0) _screenBuffer[pixelIndex] |= pageShift;
 
                 // push byte to dirty if not already there
-                if (!_dirtyBytes.Contains(pixelIndex)) _dirtyBytes.Add(pixelIndex);
+                lock (_screenUpdateLock)
+                {
+                    if (!_dirtyBytes.Contains(pixelIndex)) _dirtyBytes.Add(pixelIndex);
+                }
             });
 
             if (sync) UpdateDirtyBytes();
@@ -597,42 +609,46 @@ namespace OledI2cCore
         {
             bool success = true;
 
-            if (_dirtyBytes.Count == 0) return success;
-
-            var byteArray = _dirtyBytes.ToArray();
-            var blen = byteArray.Length;
-
-            // check to see if this will even save time
-            if (blen > _screenBuffer.Length / 7)
+            lock (_screenUpdateLock)
             {
-                // just call regular update at this stage, saves on bytes sent
-                Update();
+                if (_dirtyBytes.Count == 0) return success;
+
+                var byteArray = _dirtyBytes.ToArray();
+                var blen = byteArray.Length;
+
+                // check to see if this will even save time
+                if (blen > _screenBuffer.Length / 7)
+                {
+                    // just call regular update at this stage, saves on bytes sent
+                    Update();
+                    // now that all bytes are synced, reset dirty state
+                    _dirtyBytes.Clear();
+                }
+                else
+                {
+                    // iterate through dirty bytes
+                    for (var i = 0; i < blen; i += 1)
+                    {
+                        var byteIndex = byteArray[i];
+                        var page = (byte)Math.Floor((double)byteIndex / Width);
+                        var col = (byte)Math.Floor((double)byteIndex % Width);
+
+                        success = GoCoordinate(col, page);
+
+                        if (success)
+                        {
+                            // send byte, then move on to next byte
+                            //sent = TransferData(_screenBuffer[byte1]);
+                            success = TransferData(new[] { _screenBuffer[byteIndex] });
+                            if (!success) _logger?.Info($"Failed Sending Data {_screenBuffer[byteIndex]:X}");
+                        }
+                    }
+                }
+
                 // now that all bytes are synced, reset dirty state
                 _dirtyBytes.Clear();
             }
-            else
-            {
-                // iterate through dirty bytes
-                for (var i = 0; i < blen; i += 1)
-                {
-                    var byteIndex = byteArray[i];
-                    var page = (byte) Math.Floor((double) byteIndex / Width);
-                    var col = (byte) Math.Floor((double) byteIndex % Width);
 
-                    success = GoCoordinate(col, page);
-
-                    if (success)
-                    {
-                        // send byte, then move on to next byte
-                        //sent = TransferData(_screenBuffer[byte1]);
-                        success = TransferData(new[] {_screenBuffer[byteIndex]});
-                        if (!success) _logger?.Info($"Failed Sending Data {_screenBuffer[byteIndex]:X}");
-                    }
-                }
-            }
-
-            // now that all bytes are synced, reset dirty state
-            _dirtyBytes.Clear();
             return success;
         }
 
@@ -643,26 +659,29 @@ namespace OledI2cCore
         {
             var bufferToSend = new byte[64];
 
-            for (var i = 0; i < _screenBuffer.Length;)
-                try
-                {
-                    if (i % Width == 0)
+            lock (_screenUpdateLock)
+            {
+                for (var i = 0; i < _screenBuffer.Length;)
+                    try
                     {
-                        var y = (byte)Math.Floor(i / (double) Width);
-                        var success = GoCoordinate(0, y);
-                        if (!success) continue;
+                        if (i % Width == 0)
+                        {
+                            var y = (byte)Math.Floor(i / (double)Width);
+                            var success = GoCoordinate(0, y);
+                            if (!success) continue;
+                        }
+
+                        Buffer.BlockCopy(_screenBuffer, i, bufferToSend, 0, bufferToSend.Length);
+                        TransferData(bufferToSend);
+                    }
+                    finally
+                    {
+                        i += bufferToSend.Length;
                     }
 
-                    Buffer.BlockCopy(_screenBuffer, i, bufferToSend, 0, bufferToSend.Length);
-                    TransferData(bufferToSend);
-                }
-                finally
-                {
-                    i += bufferToSend.Length;
-                }
-
-            // Now that all bytes are synced, reset the dirty state
-            _dirtyBytes.Clear();
+                // Now that all bytes are synced, reset the dirty state
+                _dirtyBytes.Clear();
+            }
         }
 
         /// <summary>
