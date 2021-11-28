@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+// ReSharper disable InconsistentNaming
 
 namespace OledI2cCore
 {
@@ -54,54 +56,55 @@ namespace OledI2cCore
         /// <summary>
         ///     Default font to be used with simple string writes
         /// </summary>
-        private static readonly Oled_Font_5x7 DefaultFont = new Oled_Font_5x7();
+        private static readonly Oled_Font_5x7 DefaultFont = new();
 
-        private readonly List<Func<bool>> _initActions = new List<Func<bool>>();
+        private readonly List<Func<bool>> _initActions = new();
 
         /// <summary>
         /// As much as I hate locks, there is a potential issue with updating the hashset, while another operation is writing to it.
         /// </summary>
-        private readonly object _screenUpdateLock = new object();
+        private readonly object _screenUpdateLock = new();
 
         /// <summary>
         ///     Command lookup for Debugging
         /// </summary>
-        private static readonly Dictionary<byte, string> CommandLookup = new Dictionary<byte, string>(
+        // ReSharper disable once UnusedMember.Local
+        private static readonly Dictionary<byte, string> CommandLookup = new(
             new List<KeyValuePair<byte, string>>
             {
-                new KeyValuePair<byte, string>(DISPLAY_OFF, nameof(DISPLAY_OFF)),
-                new KeyValuePair<byte, string>(DISPLAY_ON, nameof(DISPLAY_ON)),
-                new KeyValuePair<byte, string>(SET_DISPLAY_CLOCK_DIV, nameof(SET_DISPLAY_CLOCK_DIV)),
-                new KeyValuePair<byte, string>(SET_MULTIPLEX, nameof(SET_MULTIPLEX)),
-                new KeyValuePair<byte, string>(SET_DISPLAY_OFFSET, nameof(SET_DISPLAY_OFFSET)),
-                new KeyValuePair<byte, string>(CHARGE_PUMP, nameof(CHARGE_PUMP)),
-                new KeyValuePair<byte, string>(MEMORY_MODE, nameof(MEMORY_MODE)),
-                new KeyValuePair<byte, string>(SEG_REMAP, nameof(SEG_REMAP)),
-                new KeyValuePair<byte, string>(COM_SCAN_DEC, nameof(COM_SCAN_DEC)),
-                new KeyValuePair<byte, string>(COM_SCAN_INC, nameof(COM_SCAN_INC)),
-                new KeyValuePair<byte, string>(SET_COM_PINS, nameof(SET_COM_PINS)),
-                new KeyValuePair<byte, string>(SET_CONTRAST, nameof(SET_CONTRAST)),
-                new KeyValuePair<byte, string>(SET_PRECHARGE, nameof(SET_PRECHARGE)),
-                new KeyValuePair<byte, string>(SET_VCOM_DETECT, nameof(SET_VCOM_DETECT)),
-                new KeyValuePair<byte, string>(DISPLAY_ALL_ON_RESUME, nameof(DISPLAY_ALL_ON_RESUME)),
-                new KeyValuePair<byte, string>(NORMAL_DISPLAY, nameof(NORMAL_DISPLAY)),
-                new KeyValuePair<byte, string>(COLUMN_ADDR, nameof(COLUMN_ADDR)),
-                new KeyValuePair<byte, string>(INVERSE_DISPLAY, nameof(INVERSE_DISPLAY)),
-                new KeyValuePair<byte, string>(ACTIVATE_SCROLL, nameof(ACTIVATE_SCROLL)),
-                new KeyValuePair<byte, string>(DEACTIVATE_SCROLL, nameof(DEACTIVATE_SCROLL)),
-                new KeyValuePair<byte, string>(SET_VERTICAL_SCROLL_AREA, nameof(SET_VERTICAL_SCROLL_AREA)),
-                new KeyValuePair<byte, string>(RIGHT_HORIZONTAL_SCROLL, nameof(RIGHT_HORIZONTAL_SCROLL)),
-                new KeyValuePair<byte, string>(LEFT_HORIZONTAL_SCROLL, nameof(LEFT_HORIZONTAL_SCROLL)),
-                new KeyValuePair<byte, string>(VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL,
+                new(DISPLAY_OFF, nameof(DISPLAY_OFF)),
+                new(DISPLAY_ON, nameof(DISPLAY_ON)),
+                new(SET_DISPLAY_CLOCK_DIV, nameof(SET_DISPLAY_CLOCK_DIV)),
+                new(SET_MULTIPLEX, nameof(SET_MULTIPLEX)),
+                new(SET_DISPLAY_OFFSET, nameof(SET_DISPLAY_OFFSET)),
+                new(CHARGE_PUMP, nameof(CHARGE_PUMP)),
+                new(MEMORY_MODE, nameof(MEMORY_MODE)),
+                new(SEG_REMAP, nameof(SEG_REMAP)),
+                new(COM_SCAN_DEC, nameof(COM_SCAN_DEC)),
+                new(COM_SCAN_INC, nameof(COM_SCAN_INC)),
+                new(SET_COM_PINS, nameof(SET_COM_PINS)),
+                new(SET_CONTRAST, nameof(SET_CONTRAST)),
+                new(SET_PRECHARGE, nameof(SET_PRECHARGE)),
+                new(SET_VCOM_DETECT, nameof(SET_VCOM_DETECT)),
+                new(DISPLAY_ALL_ON_RESUME, nameof(DISPLAY_ALL_ON_RESUME)),
+                new(NORMAL_DISPLAY, nameof(NORMAL_DISPLAY)),
+                new(COLUMN_ADDR, nameof(COLUMN_ADDR)),
+                new(INVERSE_DISPLAY, nameof(INVERSE_DISPLAY)),
+                new(ACTIVATE_SCROLL, nameof(ACTIVATE_SCROLL)),
+                new(DEACTIVATE_SCROLL, nameof(DEACTIVATE_SCROLL)),
+                new(SET_VERTICAL_SCROLL_AREA, nameof(SET_VERTICAL_SCROLL_AREA)),
+                new(RIGHT_HORIZONTAL_SCROLL, nameof(RIGHT_HORIZONTAL_SCROLL)),
+                new(LEFT_HORIZONTAL_SCROLL, nameof(LEFT_HORIZONTAL_SCROLL)),
+                new(VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL,
                     nameof(VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL)),
-                new KeyValuePair<byte, string>(VERTICAL_AND_LEFT_HORIZONTAL_SCROLL,
+                new(VERTICAL_AND_LEFT_HORIZONTAL_SCROLL,
                     nameof(VERTICAL_AND_LEFT_HORIZONTAL_SCROLL)),
-                new KeyValuePair<byte, string>(LOW_COL_ADDR, nameof(LOW_COL_ADDR)),
-                new KeyValuePair<byte, string>(HIGH_COL_ADDR, nameof(HIGH_COL_ADDR)),
-                new KeyValuePair<byte, string>(SET_PAGE_ADDRESS, nameof(SET_PAGE_ADDRESS))
+                new(LOW_COL_ADDR, nameof(LOW_COL_ADDR)),
+                new(HIGH_COL_ADDR, nameof(HIGH_COL_ADDR)),
+                new(SET_PAGE_ADDRESS, nameof(SET_PAGE_ADDRESS))
             });
 
-        private static readonly Dictionary<string, ScreenConfig> ScreenConfigs = new Dictionary<string, ScreenConfig>();
+        private static readonly Dictionary<string, ScreenConfig> ScreenConfigs = new();
 
         /// <summary>
         ///     The I2C screen index.
@@ -109,10 +112,22 @@ namespace OledI2cCore
         private readonly byte _address;
 
         /// <summary>
+        /// To reduce allocations, we will re-use this command array
+        /// </summary>
+        private readonly byte[] _commandArray = new byte[3];
+
+        /// <summary>
+        /// While using the _commandArray buffer to send to the wire, we will
+        /// lock to prevent other entries from modifying it before the previous
+        /// send has completed
+        /// </summary>
+        private readonly object _commandArrayLock = new();
+
+        /// <summary>
         ///     For performance, we will track each index of which byte needs to be updated.
         ///     This is a set of byte indexes in the _screenBuffer object.
         /// </summary>
-        private readonly HashSet<int> _dirtyBytes = new HashSet<int>();
+        private readonly HashSet<int> _dirtyBytes = new();
 
         /// <summary>
         ///     Logger Reference
@@ -139,10 +154,6 @@ namespace OledI2cCore
         /// </summary>
         private readonly II2C _wire;
 
-        // Current screen positions.
-        private byte _cursorX;
-        private byte _cursorY;
-
         /// <summary>
         ///     Static ctor - Populate the command screen resolutions with their config overrides per screen
         /// </summary>
@@ -161,6 +172,12 @@ namespace OledI2cCore
             Height = height;
             Width = width;
             _address = address;
+            
+            // To reduce allocations, populate the command array first two elements
+            // with what will be sent on each command
+            _commandArray[0] = address;
+            _commandArray[1] = MODE_COMMAND;
+
             LineSpacing = lineSpacing;
             LetterSpacing = letterSpacing;
             _logger = logger;
@@ -251,13 +268,16 @@ namespace OledI2cCore
                 _screenConfig.Multiplex, // set the last value dynamically based on screen size requirement
                 SET_DISPLAY_OFFSET, 0x00,
                 SET_START_LINE | 0x0,
+                // ReSharper disable once HeuristicUnreachableCode
                 CHARGE_PUMP, EXTERNAL_VCC ? VCC_EXTERNAL : VCC_INTERNAL,
                 MEMORY_MODE, 0x00,
                 SEG_REMAP | 0x1, // screen orientation
                 COM_SCAN_DEC, // screen orientation change to INC to flip
                 SET_COM_PINS,
                 _screenConfig.ComPins, // com pins val sets dynamically to match each screen size requirement
+                // ReSharper disable once HeuristicUnreachableCode
                 SET_CONTRAST, EXTERNAL_VCC ? 0x9F : 0xCF, // contrast val
+                // ReSharper disable once HeuristicUnreachableCode
                 SET_PRECHARGE, EXTERNAL_VCC ? 0x22 : 0xF1, // precharge val
                 SET_VCOM_DETECT, 0x40, // vcom detect
                 DISPLAY_ALL_ON_RESUME,
@@ -280,7 +300,7 @@ namespace OledI2cCore
         }
 
         /// <summary>
-        /// Data will be transfered with this command. This is used for things like drawing the screen
+        /// Data will be transferred with this command. This is used for things like drawing the screen
         /// </summary>
         /// <param name="data">data, without the address of data command.</param>
         /// <returns></returns>
@@ -288,13 +308,24 @@ namespace OledI2cCore
         {
             if (!_wire.ReadyState) return false;
 
-            //TODO: optimize to reduce allocations
-            var buffer = new byte[data.Length + 2];
-            buffer[0] = _address;
-            buffer[1] = MODE_DATA;
-            Buffer.BlockCopy(data, 0, buffer, 2, data.Length);
+            var shared = ArrayPool<byte>.Shared;
+            // Rent a buffer from the shared pool
+            var desiredLength = data.Length + 2;
+            var rentedBytes = shared.Rent(desiredLength);
 
-            return _wire.SendBytes(buffer);
+            try
+            {
+                rentedBytes[0] = _address;
+                rentedBytes[1] = MODE_DATA;
+                Buffer.BlockCopy(data, 0, rentedBytes, 2, data.Length);
+
+                return _wire.SendBytes(rentedBytes, desiredLength);
+            }
+            finally
+            {
+                // Return the buffer back to the pool
+                shared.Return(rentedBytes);
+            }
         }
 
         /// <summary>
@@ -303,24 +334,20 @@ namespace OledI2cCore
         /// </summary>
         /// <param name="command"></param>
         /// <returns></returns>
-        private bool TransferCommand(int command)
+        private bool TransferCommand(byte command)
         {
             if (!_wire.ReadyState) return false;
 
-            // TODO: optimize to reduce allocations
-            return _wire.SendBytes(new[] {_address, MODE_COMMAND, (byte)command});
-        }
-
-        /// <summary>
-        /// Set the current drawing position on the screen.
-        /// Note - use of int to clean up usage for calculated positions, but will be cast to byte inside.
-        /// </summary>
-        /// <param name="x">Pass in the value</param>
-        /// <param name="y"></param>
-        public void SetCursor(int x, int y)
-        {
-            _cursorX = (byte)x;
-            _cursorY = (byte)y;
+            // Lock to prevent other entries from modifying the array
+            // before the method has completed. 
+            // This is just an allocation optimization instead of
+            // creating a new array each send
+            lock (_commandArrayLock)
+            {
+                // Update the command to be sent
+                _commandArray[2] = command;
+                return _wire.SendBytes(_commandArray, _commandArray.Length);
+            }
         }
 
         /// <summary>
@@ -330,43 +357,53 @@ namespace OledI2cCore
         /// <param name="positionY">Y Position on the screen</param>
         /// <param name="message">Desired Message</param>
         /// <param name="size">Override of the size.</param>
-        public void WriteString(int positionX, int positionY, string message, double size = 1, int writeWidth = -1, bool wrap = false, bool inverseColor = false)
+        /// <param name="writeWidth">Clear x pixels in width before writing new chars</param>
+        /// <param name="wrap">Enable word wrapping</param>
+        /// <param name="inverseColor">Inverse the color so text is black and the background is white</param>
+        /// <param name="charMax">If supplied, will clear out the background area so when smaller text is written to this area, it wont leave behind old text</param>
+        public void WriteString(byte positionX, byte positionY, string message, decimal size = 1, int writeWidth = -1, bool wrap = false, bool inverseColor = false, int charMax = -1)
         {
-            byte x = (byte) positionX;
-            byte y = (byte) positionY;
-
             // If text is being overwritten in the same place, you can optionally clear it 
             // bye providing the write with area. Otherwise, it will not be overwritten and will
             // look funky if you write smaller text.
             if (writeWidth > 0)
             {
                 var height = DefaultFont.Height * size + LineSpacing;
-                DrawFilledRectangle(x, y, writeWidth, (int)height, inverseColor ? ScreenColor.White : ScreenColor.Black);
+                DrawFilledRectangle(positionX, positionY, writeWidth, (int)height, inverseColor ? ScreenColor.White : ScreenColor.Black);
             }
 
-            // Position where the text will be written
-            SetCursor(x, y);
+            // If the code calling this is tracking the max chars
+            // this will clear out the area for smaller text based on the current font properties being used
+            if (charMax > 0)
+            {
+                var height = DefaultFont.Height * size + LineSpacing;
+                var width = DefaultFont.Width * charMax + LetterSpacing * charMax;
+                DrawFilledRectangle(positionX, positionY, width, (int)height, inverseColor ? ScreenColor.White : ScreenColor.Black);
+            }
 
             // push out the text to the screen buffer
-            WriteString(DefaultFont, size, message, wrap: wrap, inverseColor: inverseColor);
+            WriteString(positionX, positionY, DefaultFont, size, message, wrap: wrap, inverseColor: inverseColor);
+            
         }
 
         /// <summary>
         /// Inspired by oled-i2c-bus node js project.  Will write the text string to the screen.
         /// </summary>
+        /// <param name="cursorX">starting X position to start writing</param>
+        /// <param name="cursorY">starting Y position to start writing</param>
         /// <param name="font"></param>
         /// <param name="size"></param>
         /// <param name="message"></param>
-        /// <param name="color"></param>
+        /// <param name="inverseColor">Invert the color so text is black, and around the char is white</param>
         /// <param name="wrap"></param>
         /// <param name="sync"></param>
-        public void WriteString(IFont font, double size, string message, bool inverseColor = false, bool wrap = true,
+        public void WriteString(byte cursorX, byte cursorY, IFont font, decimal size, string message,
+            bool inverseColor = false, bool wrap = true,
             bool sync = false)
         {
-            var wordArr = message.Split(new[] {' '}, StringSplitOptions.RemoveEmptyEntries);
+            var wordArr = message.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             var len = wordArr.Length;
             // start x offset at cursor pos
-            var offset = _cursorX;
 
             // loop through words
             for (var w = 0; w < len; w += 1)
@@ -379,21 +416,21 @@ namespace OledI2cCore
                 var compare = font.Width * size * slen + size * (len - 1);
 
                 // wrap words if necessary
-                if (wrap && len > 1 && offset >= Width - compare)
+                if (wrap && len > 1 && cursorX >= Width - compare)
                 {
-                    offset = 0;
+                    cursorX = 0;
 
-                    _cursorY += (byte) (font.Height * size + LineSpacing);
-                    SetCursor(offset, _cursorY);
+                    cursorY += (byte)(font.Height * size + LineSpacing);
+                    //SetCursor(offset, _cursorY);
                 }
 
                 // loop through the array of each char to draw
                 for (var i = 0; i < slen; i += 1)
                     if (stringArr[i] == '\n')
                     {
-                        offset = 0;
-                        _cursorY += (byte) (font.Height * size + LineSpacing);
-                        SetCursor(offset, _cursorY);
+                        cursorX = 0;
+                        cursorY += (byte)(font.Height * size + LineSpacing);
+                        //SetCursor(offset, _cursorY);
                     }
                     else
                     {
@@ -404,21 +441,21 @@ namespace OledI2cCore
 
                         var charBytes = ReadCharBytes(charBuf);
                         // draw the entire character
-                        DrawChar(charBytes, size, false, inverseColor: inverseColor);
+                        DrawChar(cursorX, cursorY, charBytes, size, false, inverseColor: inverseColor);
 
                         // calc new x position for the next char, add a touch of padding too if it's a non space char
                         //padding = (stringArr[i] === ' ') ? 0 : this.LetterSpacing;
-                        offset += (byte) (font.Width * size + LetterSpacing); // padding;
+                        cursorX += (byte)(font.Width * size + LetterSpacing); // padding;
 
                         // wrap letters if necessary
-                        if (wrap && offset >= Width - font.Width - LetterSpacing)
+                        if (wrap && cursorX >= Width - font.Width - LetterSpacing)
                         {
-                            offset = 0;
-                            _cursorY += (byte) (font.Height * size + LineSpacing);
+                            cursorX = 0;
+                            cursorY += (byte)(font.Height * size + LineSpacing);
                         }
 
                         // set the 'cursor' for the next char to be drawn, then loop again for next char
-                        SetCursor(offset, _cursorY);
+                        //SetCursor(offset, _cursorY);
                     }
             }
 
@@ -461,15 +498,17 @@ namespace OledI2cCore
         /// <summary>
         /// Draw a char
         /// </summary>
+        /// <param name="cursorX"></param>
+        /// <param name="cursorY"></param>
         /// <param name="byteArray"></param>
         /// <param name="size"></param>
         /// <param name="sync"></param>
         /// <param name="inverseColor">Invert the color</param>
-        public void DrawChar(byte[][] byteArray, double size, bool sync, bool inverseColor)
+        public void DrawChar(byte cursorX, byte cursorY, byte[][] byteArray, decimal size, bool sync, bool inverseColor)
         {
             // take your positions...
-            var x = _cursorX;
-            var y = _cursorY;
+            //var x = _cursorX;
+            //var y = _cursorY;
 
             // loop through the byte array containing the hexes for the char
             for (byte i = 0; i < byteArray.Length; i += 1)
@@ -491,18 +530,18 @@ namespace OledI2cCore
                 byte xpos;
                 byte ypos;
                 // standard font size
-                if (size == 1.0)
+                if (size == 1.0m)
                 {
-                    xpos = (byte) (x + i);
-                    ypos = (byte) (y + j);
+                    xpos = (byte) (cursorX + i);
+                    ypos = (byte) (cursorY + j);
                     DrawPixel(new ScreenPixel(xpos, ypos, screenColor));
                 }
                 else
                 {
                     // MATH! Calculating pixel size multiplier to primitively scale the font
-                    xpos = (byte) (x + i * size);
-                    ypos = (byte) (y + j * size);
-                    DrawFilledRectangle(xpos, ypos, (int)size, (int)size, screenColor, false);
+                    xpos = (byte) (cursorX + i * size);
+                    ypos = (byte) (cursorY + j * size);
+                    DrawFilledRectangle(xpos, ypos, (int)size, (int)size, screenColor);
                 }
             }
 
@@ -573,15 +612,11 @@ namespace OledI2cCore
 
                 if (x >= Width || y >= Height) return;
 
-                // thanks, Martin Richards.
-                // I wanna can this, this tool is for devs who get 0 indexes
-                //x -= 1; y -=1;
-                var pixelIndex = 0;
                 var page = (byte) Math.Floor(y / 8.0);
                 var pageShift = (byte) (0x01 << (y - 8 * page));
 
                 // is the pixel on the first row of the page?
-                pixelIndex = page == 0 ? x : x + Width * page;
+                var pixelIndex = page == 0 ? x : x + Width * page;
 
                 // colors! Well, monochrome.
                 //color == "BLACK" || 
@@ -707,9 +742,9 @@ namespace OledI2cCore
             var lowColumn = LOW_COL_ADDR | (x & 0xF);
             var highColumn = HIGH_COL_ADDR | (x >> 4);
 
-            return TransferCommand(row) // Set row
-                   && TransferCommand(lowColumn) // Set lower column address
-                   && TransferCommand(highColumn); //Set higher column address
+            return TransferCommand((byte)row) // Set row
+                   && TransferCommand((byte)lowColumn) // Set lower column address
+                   && TransferCommand((byte)highColumn); //Set higher column address
         }
 
         /// <summary>
