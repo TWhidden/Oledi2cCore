@@ -12,7 +12,7 @@ Current Display I am using is an SH1106 (https://www.amazon.com/gp/product/B01MR
 
 Example: 
 
-[![OLED Screen Example](https://i9.ytimg.com/vi_webp/OpSDj8zTyMs/mqdefault.webp?v=61b64227&sqp=CICE2Y0G&rs=AOn4CLAKfFiadgZJddWw0xAdaYykdDPw6A)](https://youtu.be/StTqXEQ2l-Y "OLED Screen Example")
+[![OLED Screen Example](https://i9.ytimg.com/vi_webp/OpSDj8zTyMs/mqdefault.webp?v=61b64227&sqp=CICE2Y0G&rs=AOn4CLAKfFiadgZJddWw0xAdaYykdDPw6A)](https://youtu.be/OpSDj8zTyMs "OLED Screen Example")
 
 
 The FtdiI2cCore project is the abstraction over the I2C / USB FT232H. This can be used to talk to any I2C with this chip set and .net core. 
